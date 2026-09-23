@@ -2,16 +2,19 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { jsPDF } from "jspdf";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { formatINR } from "@/lib/fee-calc";
+import { formatINR, type Payment } from "@/lib/fee-calc";
 import SignaturePad, { type SignaturePadHandle } from "@/components/SignaturePad";
+import PaymentsPanel from "@/components/PaymentsPanel";
 
 const PLUM: [number, number, number] = [64, 12, 77];
 const SOFT: [number, number, number] = [107, 101, 88];
 
-export default function ReceiptView({ admission }: { admission: any }) {
+export default function ReceiptView({ admission, payments = [] }: { admission: any; payments?: Payment[] }) {
   const supabase = supabaseBrowser();
+  const router = useRouter();
   const sigRef = useRef<SignaturePadHandle>(null);
   const [signedByName, setSignedByName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -112,7 +115,7 @@ export default function ReceiptView({ admission }: { admission: any }) {
     y = row(doc, y, "Net payable (incl. GST)", formatINR(admission.net_incl_gst), { bold: true });
     y = row(doc, y, "Additional discount", `− ${formatINR(admission.additional_discount)}`);
     y = row(doc, y, "Actual fee payable", formatINR(admission.actual_payable), { bold: true, big: true });
-    y = row(doc, y, "Fees paid so far", formatINR(admission.actual_fees_paid));
+    y = row(doc, y, "Fees paid so far", formatINR(admission.total_paid));
     y = row(doc, y, "Net outstanding", formatINR(Math.max(admission.outstanding, 0)));
     y = row(doc, y, "Billing status", admission.billing_status, { bold: true });
 
@@ -206,9 +209,19 @@ export default function ReceiptView({ admission }: { admission: any }) {
 
   return (
     <>
-      <Link href="/calculator" className="comp-hint">
-        &larr; Back to calculator
-      </Link>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <Link href="/calculator" className="comp-hint">
+          &larr; Back to calculator
+        </Link>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Link href={`/admissions/${admission.id}/edit`} className="btn secondary small">
+            Edit details
+          </Link>
+          <Link href={`/admissions/${admission.id}/invoice`} className="btn secondary small">
+            Print invoice
+          </Link>
+        </div>
+      </div>
       <div style={{ height: 16 }} />
       <div className="grid-2">
         <div className="stack">
@@ -254,6 +267,14 @@ export default function ReceiptView({ admission }: { admission: any }) {
               </button>
             </div>
           )}
+
+          <PaymentsPanel
+            admissionId={admission.id}
+            counselorId={admission.counselor_id}
+            initialPayments={payments}
+            baseAmount={admission.actual_fees_paid}
+            onChanged={() => router.refresh()}
+          />
         </div>
 
         <div className="stack">

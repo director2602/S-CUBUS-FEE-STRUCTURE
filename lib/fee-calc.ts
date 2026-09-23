@@ -75,3 +75,17 @@ export function computeFees(inputs: FeeInputs) {
 }
 
 export const BATCH_GROUP_ORDER = ["Foundation", "JEE", "NEET", "Online", "SIP", "Other"];
+
+export const INSTALLMENT_LABELS = ["Registration", "Installment 1", "Installment 2", "Installment 3", "Other"] as const;
+
+export type Payment = {
+  id: string;
+  admission_id: string;
+  installment_label: (typeof INSTALLMENT_LABELS)[number];
+  amount: number;
+  paid_on: string;
+  mode: string | null;
+  note: string | null;
+  recorded_by: string | null;
+  created_at: string;
+};

@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabase/server";
 import { formatINR } from "@/lib/fee-calc";
+import DashboardLedger from "@/components/DashboardLedger";
 
 type Row = {
   id: string;
@@ -8,7 +9,7 @@ type Row = {
   batch_group: string;
   gross_fee: number;
   actual_payable: number;
-  actual_fees_paid: number;
+  total_paid: number;
   outstanding: number;
   billing_status: "Paid in Full" | "Unpaid" | "Partially Paid";
 };
@@ -26,19 +27,18 @@ export default async function DashboardPage() {
   const supabase = supabaseServer();
 
   const [{ data: rows }, { data: profiles }] = await Promise.all([
-    supabase
-      .from("admissions_computed")
-      .select("id, counselor_id, batch_label, batch_group, gross_fee, actual_payable, actual_fees_paid, outstanding, billing_status"),
+    supabase.from("admissions_computed").select("*"),
     supabase.from("profiles").select("id, full_name, email").eq("role", "counselor")
   ]);
 
-  const data = (rows as Row[]) || [];
-  const counselorNames = new Map((profiles || []).map((p: any) => [p.id, p.full_name || p.email]));
+  const data = (rows as any[]) || [];
+  const counselors = (profiles || []).map((p: any) => ({ id: p.id, name: p.full_name || p.email }));
+  const counselorNames = new Map(counselors.map((c) => [c.id, c.name]));
 
   const totalAdmissions = data.length;
   const totalGross = data.reduce((s, r) => s + Number(r.gross_fee || 0), 0);
   const totalPayable = data.reduce((s, r) => s + Number(r.actual_payable || 0), 0);
-  const totalCollected = data.reduce((s, r) => s + Number(r.actual_fees_paid || 0), 0);
+  const totalCollected = data.reduce((s, r) => s + Number(r.total_paid || 0), 0);
   const totalOutstanding = data.reduce((s, r) => s + Math.max(0, Number(r.outstanding || 0)), 0);
   const paidInFull = data.filter((r) => r.billing_status === "Paid in Full").length;
   const partiallyPaid = data.filter((r) => r.billing_status === "Partially Paid").length;
@@ -50,7 +50,7 @@ export default async function DashboardPage() {
     const cur = byBatch.get(key) || { label: key, count: 0, gross: 0, collected: 0 };
     cur.count += 1;
     cur.gross += Number(r.gross_fee || 0);
-    cur.collected += Number(r.actual_fees_paid || 0);
+    cur.collected += Number(r.total_paid || 0);
     byBatch.set(key, cur);
   }
   const batchRows = [...byBatch.values()].sort((a, b) => b.gross - a.gross);
@@ -62,7 +62,7 @@ export default async function DashboardPage() {
     const cur = byCounselor.get(name) || { name, count: 0, payable: 0, collected: 0, outstanding: 0 };
     cur.count += 1;
     cur.payable += Number(r.actual_payable || 0);
-    cur.collected += Number(r.actual_fees_paid || 0);
+    cur.collected += Number(r.total_paid || 0);
     cur.outstanding += Math.max(0, Number(r.outstanding || 0));
     byCounselor.set(name, cur);
   }
@@ -180,6 +180,10 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      <div style={{ height: 32 }} />
+
+      <DashboardLedger rows={data as any} counselors={counselors} />
     </>
   );
 }

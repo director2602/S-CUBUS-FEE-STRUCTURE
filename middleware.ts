@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const OWNER_ONLY_PREFIXES = ["/dashboard", "/counselors"];
+const OWNER_ONLY_PREFIXES = ["/dashboard", "/counselors", "/fee-structure"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });

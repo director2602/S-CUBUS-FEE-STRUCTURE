@@ -60,7 +60,7 @@ export default function AdmissionsList({ isOwner, reloadToken }: { isOwner: bool
               <th style={{ textAlign: "right" }}>Payable</th>
               <th style={{ textAlign: "right" }}>Outstanding</th>
               <th>Status</th>
-              <th>Receipt</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -78,9 +78,17 @@ export default function AdmissionsList({ isOwner, reloadToken }: { isOwner: bool
                   </span>
                 </td>
                 <td>
-                  <Link className="btn small secondary" href={`/admissions/${r.id}`}>
-                    {r.pdf_path ? "View / re-sign" : "Sign & download"}
-                  </Link>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Link className="btn small secondary" href={`/admissions/${r.id}/edit`}>
+                      Edit
+                    </Link>
+                    <Link className="btn small secondary" href={`/admissions/${r.id}/invoice`}>
+                      Print invoice
+                    </Link>
+                    <Link className="btn small secondary" href={`/admissions/${r.id}`}>
+                      {r.pdf_path ? "View / re-sign" : "Sign & download"}
+                    </Link>
+                  </div>
                 </td>
               </tr>
             ))}

@@ -7,7 +7,13 @@ export default function NavLinks({ isOwner }: { isOwner: boolean }) {
   const pathname = usePathname();
   const links = [
     { href: "/calculator", label: "Calculator" },
-    ...(isOwner ? [{ href: "/dashboard", label: "Dashboard" }, { href: "/counselors", label: "Counselors" }] : [])
+    ...(isOwner
+      ? [
+          { href: "/dashboard", label: "Dashboard" },
+          { href: "/fee-structure", label: "Fee Structure" },
+          { href: "/counselors", label: "Counselors" }
+        ]
+      : [])
   ];
   return (
     <>

@@ -9,14 +9,36 @@ counselor and batch.
 
 - **Database & auth**: Supabase project `scubus-fee-portal` (id `dqgwafdihafcttynfaea`), in your
   `s-cubus career private limited` org, region `ap-south-1` (Mumbai).
-  - Tables: `batches` (all 24 fee-master rows seeded), `admissions`, `profiles`.
+  - Tables: `batches` (the fee master — owner-editable, see below), `admissions`, `payments`
+    (individual installment records), `profiles`.
   - `admissions_computed` view does all the fee/GST/installment math in SQL (mirrors
-    `lib/fee-calc.ts` exactly, so the app and the database always agree).
-  - Row-level security: a counselor can only see/edit their own admissions; the owner (the account
-    signed up with `director@scubus.com`) sees and manages everything.
+    `lib/fee-calc.ts` exactly, so the app and the database always agree), and now also sums each
+    admission's logged `payments` into `total_paid` / `outstanding` / `billing_status`.
+  - Row-level security: a counselor can only see/edit their own admissions and their payments; the
+    owner (the account signed up with `director@scubus.com`) sees and manages everything.
   - Storage bucket `fee-receipts` (private) holds a durable copy of every signed PDF, at
     `<counselor_id>/<admission_id>.pdf`.
   - A trigger auto-creates a `profiles` row (role `owner` or `counselor`) whenever someone signs up.
+- **Editing a saved admission**: the owner can edit any admission's details from its "Edit" link;
+  a counselor can edit their own. Editing an admission never touches the `batches` fee master.
+- **Revising the fee master**: the owner-only `/fee-structure` page edits `batches` directly.
+  Because every admission stores its own effective reg/tuition/kit fee and scholarship % at save
+  time (a frozen snapshot, never `null`), changing a batch's fee here only affects *new* admissions
+  going forward — it never rewrites what an existing student already agreed to.
+- **Installment tracking**: from any admission's page (`/admissions/[id]`), a counselor can log each
+  installment as it's actually paid (stage, amount, date, mode, note) via the Payments panel, and
+  edit or delete a logged payment later if it was entered wrong. The amount entered at admission
+  time is the opening balance; every payment logged afterwards adds on top of it, so `total_paid` /
+  `outstanding` / billing status always reflect the real running total — not just what was typed
+  once at save time.
+- **Printing an invoice**: every counselor can print any admission they can see as a clean invoice
+  from its "Print invoice" link (`/admissions/[id]/invoice` → browser print).
+- **Owner dashboard**: `/dashboard` has summary KPIs, revenue-by-batch and per-counselor rollups,
+  plus a full filterable ledger of every admission — filter by counselor, batch group, billing
+  status, admission date range, or free-text search; sort any column; expand a row for every
+  calculator field (fee components, GST, installments, payment modes, PDC numbers, remarks,
+  signature status); select rows to see a live payable/paid/outstanding total for just that
+  selection; and export the filtered or selected rows to CSV.
 
 ## What you need to do once
 
@@ -75,7 +97,11 @@ This is a standard Next.js 14 (App Router) app — deploys anywhere that runs No
 
 ## Known limitation
 
-`npm audit` flags a transitive `postcss` advisory bundled inside Next.js 14's own build tooling
-(build-time only, not something an end user can trigger through this app). Fixing it requires a
-Next.js major-version upgrade, which I didn't do blindly to avoid breaking the App Router APIs used
-here — worth revisiting later.
+`npm audit` flags advisories in Next.js 14.2.x itself (cache poisoning, SSRF in Server Actions,
+DoS, plus a build-time-only `postcss` issue). Next has stopped backporting fixes to the 14.x line
+for these — a fix needs a major-version jump to Next 15/16, which changes the App Router cookie
+APIs (`cookies()` becomes async) used throughout this app's auth. That's a real migration, not a
+patch bump, so I didn't do it silently alongside unrelated feature work. Since this app sits behind
+login for S-CUBUS staff only (no public write-heavy Server Actions beyond the counselor invite
+form, and no user-controlled rewrites), the practical exposure is low, but it's worth scheduling a
+dedicated Next 15/16 upgrade + regression pass rather than leaving it indefinitely.

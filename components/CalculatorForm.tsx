@@ -43,23 +43,55 @@ const emptyNotes: Notes = { modeReg: "", mode1: "", mode2: "", mode3: "", pdc1: 
 export default function CalculatorForm({
   batches,
   counselorId,
-  onSaved
+  onSaved,
+  mode = "create",
+  admissionId,
+  initial
 }: {
   batches: Batch[];
   counselorId: string;
   onSaved?: () => void;
+  mode?: "create" | "edit";
+  admissionId?: string;
+  initial?: any;
 }) {
   const supabase = supabaseBrowser();
-  const [batchKey, setBatchKey] = useState(batches[0]?.key ?? "");
-  const [regOverride, setRegOverride] = useState<number | null>(null);
-  const [tuitionOverride, setTuitionOverride] = useState<number | null>(null);
-  const [kitOverride, setKitOverride] = useState<number | null>(null);
-  const [scholarshipPct, setScholarshipPct] = useState<number | null>(null);
-  const [gstRate, setGstRate] = useState(18);
-  const [additionalDiscount, setAdditionalDiscount] = useState(0);
-  const [actualFeesPaid, setActualFeesPaid] = useState(0);
-  const [student, setStudent] = useState<Student>(emptyStudent);
-  const [notes, setNotes] = useState<Notes>(emptyNotes);
+  const [batchKey, setBatchKey] = useState(initial?.batch_key ?? batches[0]?.key ?? "");
+  const [regOverride, setRegOverride] = useState<number | null>(initial?.reg_fee_override ?? null);
+  const [tuitionOverride, setTuitionOverride] = useState<number | null>(initial?.tuition_fee_override ?? null);
+  const [kitOverride, setKitOverride] = useState<number | null>(initial?.kit_fee_override ?? null);
+  const [scholarshipPct, setScholarshipPct] = useState<number | null>(initial?.scholarship_pct ?? null);
+  const [gstRate, setGstRate] = useState(initial?.gst_rate ?? 18);
+  const [additionalDiscount, setAdditionalDiscount] = useState(initial?.additional_discount ?? 0);
+  const [actualFeesPaid, setActualFeesPaid] = useState(initial?.actual_fees_paid ?? 0);
+  const [student, setStudent] = useState<Student>(
+    initial
+      ? {
+          scid: initial.scid ?? "",
+          name: initial.student_name ?? "",
+          mother: initial.mother_name ?? "",
+          father: initial.father_name ?? "",
+          email: initial.email ?? "",
+          phone1: initial.phone1 ?? "",
+          phone2: initial.phone2 ?? "",
+          admissionDate: initial.admission_date ?? "",
+          batchStart: initial.batch_commencement_date ?? ""
+        }
+      : emptyStudent
+  );
+  const [notes, setNotes] = useState<Notes>(
+    initial
+      ? {
+          modeReg: initial.mode_reg ?? "",
+          mode1: initial.mode1 ?? "",
+          mode2: initial.mode2 ?? "",
+          mode3: initial.mode3 ?? "",
+          pdc1: initial.pdc1 ?? "",
+          pdc2: initial.pdc2 ?? "",
+          remarks: initial.remarks ?? ""
+        }
+      : emptyNotes
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -102,7 +134,8 @@ export default function CalculatorForm({
     setSaving(true);
     setError(null);
     setSavedMsg(null);
-    const { error } = await supabase.from("admissions").insert({
+
+    const payload = {
       scid: student.scid || null,
       student_name: student.name,
       mother_name: student.mother || null,
@@ -113,11 +146,13 @@ export default function CalculatorForm({
       admission_date: student.admissionDate || null,
       batch_commencement_date: student.batchStart || null,
       batch_key: batch.key,
-      counselor_id: counselorId,
-      reg_fee_override: regOverride,
-      tuition_fee_override: tuitionOverride,
-      kit_fee_override: kitOverride,
-      scholarship_pct: scholarshipPct,
+      // Always store the actual effective numbers (never null) so this admission is a frozen
+      // snapshot: a later change to the batch's base fee structure (a fee revision) must never
+      // retroactively alter a fee that was already calculated and agreed with a student.
+      reg_fee_override: regOverride ?? batch.reg_fee,
+      tuition_fee_override: tuitionOverride ?? batch.tuition_fee,
+      kit_fee_override: kitOverride ?? batch.kit_fee,
+      scholarship_pct: scholarshipPct ?? batch.default_scholarship_pct,
       gst_rate: gstRate,
       additional_discount: additionalDiscount,
       actual_fees_paid: actualFeesPaid,
@@ -128,12 +163,25 @@ export default function CalculatorForm({
       pdc1: notes.pdc1 || null,
       pdc2: notes.pdc2 || null,
       remarks: notes.remarks || null
-    });
+    };
+
+    const { error } =
+      mode === "edit" && admissionId
+        ? await supabase.from("admissions").update(payload).eq("id", admissionId)
+        : await supabase.from("admissions").insert({ ...payload, counselor_id: counselorId });
+
     setSaving(false);
     if (error) {
       setError(error.message);
       return;
     }
+
+    if (mode === "edit") {
+      setSavedMsg("Changes saved.");
+      onSaved?.();
+      return;
+    }
+
     setSavedMsg(`Saved ${student.name}'s admission.`);
     setStudent(emptyStudent);
     setNotes(emptyNotes);
@@ -338,17 +386,29 @@ export default function CalculatorForm({
               <input className="money-input" type="number" min={0} value={additionalDiscount} onChange={(e) => setAdditionalDiscount(parseFloat(e.target.value) || 0)} />
             </div>
             <div className="field">
-              <label>Actual fees paid so far</label>
+              <label>Fees paid {mode === "edit" ? "(at admission)" : "at admission"}</label>
               <input className="money-input" type="number" min={0} value={actualFeesPaid} onChange={(e) => setActualFeesPaid(parseFloat(e.target.value) || 0)} />
+              <div className="comp-hint">
+                {mode === "edit"
+                  ? "This is the opening amount only. Log every installment paid after admission from the Payments panel on this admission's page — it adds on top of this figure."
+                  : "Amount collected right now, if any. Once saved, log each later installment from the admission's Payments panel so the running total stays accurate."}
+              </div>
             </div>
           </div>
+          {mode === "edit" && initial?.payments_count > 0 && (
+            <div className="comp-hint" style={{ marginBottom: 8 }}>
+              Plus {formatINR(initial.payments_total)} already logged across {initial.payments_count} tracked
+              installment{initial.payments_count === 1 ? "" : "s"} &mdash; the figures below don't include those
+              until you save; see the Payments panel for the true running total.
+            </div>
+          )}
           <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
           <div className="sum-row">
             <span className="sum-label strong">Actual fee payable</span>
             <span className="sum-val big">{formatINR(result.actualPayable)}</span>
           </div>
           <div className="sum-row">
-            <span className="sum-label">Net outstanding</span>
+            <span className="sum-label">Net outstanding {mode === "edit" && initial?.payments_count > 0 ? "(excl. tracked installments)" : ""}</span>
             <span className="sum-val">{formatINR(Math.max(result.outstanding, 0))}</span>
           </div>
           <div className="sum-row">
@@ -402,7 +462,7 @@ export default function CalculatorForm({
           {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
           {savedMsg && <div className="success-text" style={{ marginTop: 12 }}>{savedMsg}</div>}
           <button className="btn" style={{ marginTop: 16, width: "100%" }} onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Save admission"}
+            {saving ? "Saving…" : mode === "edit" ? "Save changes" : "Save admission"}
           </button>
         </div>
       </div>
