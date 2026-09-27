@@ -10,6 +10,7 @@ export default function NavLinks({ isOwner }: { isOwner: boolean }) {
     ...(isOwner
       ? [
           { href: "/dashboard", label: "Dashboard" },
+          { href: "/annual-plan", label: "Annual Plan" },
           { href: "/fee-structure", label: "Fee Structure" },
           { href: "/counselors", label: "Counselors" }
         ]

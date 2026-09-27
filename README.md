@@ -95,6 +95,29 @@ This is a standard Next.js 14 (App Router) app — deploys anywhere that runs No
   Supabase Storage path on the `admissions` row, so "who signed, when, and a copy of what they
   signed" is always retrievable — not just downloaded once and forgotten.
 
+## Annual Operating Plan (`/annual-plan`)
+
+An owner-only planning tool, ported into the Fee Portal from the standalone S-CUBUS AOP app so
+there's one login and one deployment instead of two. Four tabs, all live off the same assumptions
+(`lib/aop-calc.ts` has the formulas):
+
+- **Overview** — adjustable assumptions (students, average fee, growth rate, cost percentages,
+  rent, other overheads, tax rate), an auto-written executive summary, a budget-allocation bar, and
+  the annual P&amp;L statement. Saving assumptions writes to `aop_assumptions` (one row per fiscal
+  year, `fiscal_year` e.g. `"2026-27"`) so every owner session sees the same numbers.
+- **Staffing & Payroll** — a roster (add rows by hand or bulk-upload a CSV: `Role,Department,
+  Headcount,MonthlySalaryPerEmployee`), stored in `aop_staff`, cross-checked against the
+  Teaching + Admin assumption.
+- **Reports** — Weekly/Monthly/Quarterly/Annual views with a plan-vs-actual bar chart and table,
+  CSV export.
+- **Actual vs Plan** — **actual revenue is pulled automatically** from real admissions and
+  payments already in this database (no manual upload, unlike the original standalone tool) by
+  fiscal month; only actual costs (teaching/marketing/admin/rent/other) are entered by hand or
+  bulk-uploaded, stored in `aop_actual_costs`.
+
+The institute's fiscal year runs **April–March**; `currentFiscalYear()` / `fiscalMonthIndex()` in
+`lib/aop-calc.ts` handle that mapping everywhere.
+
 ## Known limitation
 
 `npm audit` flags advisories in Next.js 14.2.x itself (cache poisoning, SSRF in Server Actions,
