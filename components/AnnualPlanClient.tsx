@@ -123,39 +123,67 @@ function AllocationBar({ segments }: { segments: PlanResult["segments"] }) {
   );
 }
 
-function PnLTable({ plan }: { plan: PlanResult }) {
-  const pct = (v: number) => (plan.revenue ? pct1((Math.abs(v) / plan.revenue) * 100) : "—");
-  const rows: [string, number, boolean?][] = [
-    ["Revenue", plan.revenue],
-    ["Teaching & academic", -plan.teaching],
-    ["Gross profit", plan.grossProfit, true],
-    ["Marketing & admissions", -plan.marketing],
-    ["Admin, ops & support", -plan.admin],
-    ["Rent & infrastructure", -plan.rent],
-    ["Other fixed overheads", -plan.other],
-    ["EBITDA", plan.ebitda, true],
-    ["Income tax", -plan.tax],
-    ["Net profit", plan.netProfit, true]
+type PnLActual = {
+  revenue: number;
+  teaching: number;
+  marketing: number;
+  admin: number;
+  rent: number;
+  other: number;
+  ebitda: number;
+  tax: number;
+  netProfit: number;
+};
+
+// Costs are stored as negative numbers throughout (they're deductions), so for every row —
+// revenue, cost or profit alike — a higher (less negative) actual than target is always the
+// good direction: spent less, or earned/kept more. One variance rule covers every line.
+function pnlVarianceColor(v: number | null) {
+  if (v == null) return undefined;
+  return v >= 0 ? "var(--good-fg)" : "var(--bad-fg)";
+}
+
+function PnLTable({ plan, actual }: { plan: PlanResult; actual: PnLActual }) {
+  const rows: [string, number, number, boolean?][] = [
+    ["Revenue", plan.revenue, actual.revenue],
+    ["Teaching & academic", -plan.teaching, -actual.teaching],
+    ["Gross profit", plan.grossProfit, actual.revenue - actual.teaching, true],
+    ["Marketing & admissions", -plan.marketing, -actual.marketing],
+    ["Admin, ops & support", -plan.admin, -actual.admin],
+    ["Rent & infrastructure", -plan.rent, -actual.rent],
+    ["Other fixed overheads", -plan.other, -actual.other],
+    ["EBITDA", plan.ebitda, actual.ebitda, true],
+    ["Income tax", -plan.tax, -actual.tax],
+    ["Net profit", plan.netProfit, actual.netProfit, true]
   ];
   return (
-    <table className="data">
+    <table className="data compare-table">
       <thead>
         <tr>
           <th>Line item</th>
-          <th style={{ textAlign: "right" }}>Amount</th>
-          <th style={{ textAlign: "right" }}>% of revenue</th>
+          <th style={{ textAlign: "right" }}>Target</th>
+          <th style={{ textAlign: "right" }}>Actual</th>
+          <th style={{ textAlign: "right" }}>Variance</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map(([label, val, strong]) => (
-          <tr key={label}>
-            <td style={strong ? { fontWeight: 700 } : undefined}>{label}</td>
-            <td className="amt" style={strong ? { fontWeight: 700 } : undefined}>
-              {formatINR(val)}
-            </td>
-            <td className="amt">{pct(val)}</td>
-          </tr>
-        ))}
+        {rows.map(([label, target, actualVal, strong]) => {
+          const v = variance(actualVal, target);
+          return (
+            <tr key={label}>
+              <td style={strong ? { fontWeight: 700 } : undefined}>{label}</td>
+              <td className="amt" style={strong ? { fontWeight: 700 } : undefined}>
+                {formatINR(target)}
+              </td>
+              <td className="amt" style={{ fontWeight: 700 }}>
+                {formatINR(actualVal)}
+              </td>
+              <td className="amt" style={{ color: pnlVarianceColor(v) }}>
+                {varianceLabel(v)}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -691,16 +719,47 @@ export default function AnnualPlanClient(props: Props) {
     return { students, booked, collected, outstanding };
   }, [props.fyAdmissionActuals]);
 
-  const actualCostsTotal = useMemo(
-    () => costRows.reduce((s, r) => s + r.teachingCost + r.marketingCost + r.adminCost + r.rent + r.otherOverheads, 0),
+  const actualCostBreakdown = useMemo(
+    () =>
+      costRows.reduce(
+        (s, r) => ({
+          teaching: s.teaching + r.teachingCost,
+          marketing: s.marketing + r.marketingCost,
+          admin: s.admin + r.adminCost,
+          rent: s.rent + r.rent,
+          other: s.other + r.otherOverheads
+        }),
+        { teaching: 0, marketing: 0, admin: 0, rent: 0, other: 0 }
+      ),
     [costRows]
   );
+  const actualCostsTotal =
+    actualCostBreakdown.teaching + actualCostBreakdown.marketing + actualCostBreakdown.admin + actualCostBreakdown.rent + actualCostBreakdown.other;
   const actualEbitdaCash = companyActual.collected - actualCostsTotal;
 
   const studentsAchievedPct = assumptions.students ? Math.round((companyActual.students / assumptions.students) * 1000) / 10 : null;
   const revenueBookedAchievedPct = plan.revenue ? Math.round((companyActual.booked / plan.revenue) * 1000) / 10 : null;
   const revenueCollectedAchievedPct = plan.revenue ? Math.round((companyActual.collected / plan.revenue) * 1000) / 10 : null;
   const ebitdaAchievedPct = plan.ebitda ? Math.round((actualEbitdaCash / plan.ebitda) * 1000) / 10 : null;
+
+  // Actual P&L for the "Target vs Actual" table: cash-basis revenue (collected, not
+  // booked) so Actual Revenue - Actual Costs reconciles exactly to actualEbitdaCash above.
+  // Tax isn't tracked as an actual figure, so it's estimated the same way the plan itself
+  // estimates it — the assumptions tax rate applied to positive EBITDA.
+  const pnlActual: PnLActual = useMemo(() => {
+    const taxActual = actualEbitdaCash > 0 ? Math.round(actualEbitdaCash * (assumptions.taxRate / 100)) : 0;
+    return {
+      revenue: companyActual.collected,
+      teaching: actualCostBreakdown.teaching,
+      marketing: actualCostBreakdown.marketing,
+      admin: actualCostBreakdown.admin,
+      rent: actualCostBreakdown.rent,
+      other: actualCostBreakdown.other,
+      ebitda: actualEbitdaCash,
+      tax: taxActual,
+      netProfit: actualEbitdaCash - taxActual
+    };
+  }, [companyActual.collected, actualCostBreakdown, actualEbitdaCash, assumptions.taxRate]);
 
   const counselorTargetsList: CounselorTarget[] = useMemo(
     () =>
@@ -988,9 +1047,12 @@ export default function AnnualPlanClient(props: Props) {
               <div className="card">
                 <div className="card-head">
                   <span className="kicker">P&amp;L statement</span>
-                  <h2 className="card-title">Annual, FY {props.fiscalYear}</h2>
+                  <h2 className="card-title">Target vs Actual, FY {props.fiscalYear}</h2>
                 </div>
-                <PnLTable plan={plan} />
+                <PnLTable plan={plan} actual={pnlActual} />
+                <div className="comp-hint" style={{ marginTop: 10 }}>
+                  Actual revenue is cash collected to date (not booked); actual costs are from the Reports tab; income tax is estimated at the assumption rate above on positive EBITDA.
+                </div>
               </div>
             </div>
           </div>

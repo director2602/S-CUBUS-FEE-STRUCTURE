@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { BATCH_GROUP_ORDER, formatINR, type Batch } from "@/lib/fee-calc";
+import { cleanCustomFieldValues, type CustomFieldDef } from "@/lib/custom-fields";
+import { CustomFieldControl } from "@/components/CustomFieldInputs";
 
 type Row = Batch & { _dirty?: boolean; _isNew?: boolean };
 
@@ -26,11 +28,12 @@ const blankRow = (sortOrder: number): Row => ({
   default_scholarship_pct: 0,
   sort_order: sortOrder,
   active: true,
+  custom_fields: {},
   _isNew: true,
   _dirty: true
 });
 
-export default function FeeStructureEditor({ initialBatches }: { initialBatches: Batch[] }) {
+export default function FeeStructureEditor({ initialBatches, fieldDefs = [] }: { initialBatches: Batch[]; fieldDefs?: CustomFieldDef[] }) {
   const supabase = supabaseBrowser();
   const [rows, setRows] = useState<Row[]>(initialBatches.map((b) => ({ ...b })));
   const [saving, setSaving] = useState(false);
@@ -85,7 +88,7 @@ export default function FeeStructureEditor({ initialBatches }: { initialBatches:
 
     const payload = finalRows
       .filter((r) => r._dirty)
-      .map(({ _dirty, _isNew, ...b }) => b);
+      .map(({ _dirty, _isNew, ...b }) => ({ ...b, custom_fields: cleanCustomFieldValues(b.custom_fields || {}) }));
 
     const { error } = await supabase.from("batches").upsert(payload, { onConflict: "key" });
     setSaving(false);
@@ -115,6 +118,9 @@ export default function FeeStructureEditor({ initialBatches }: { initialBatches:
               <th style={{ textAlign: "right" }}>Kit fee</th>
               <th style={{ textAlign: "right" }}>Scholarship %</th>
               <th style={{ textAlign: "right" }}>Gross</th>
+              {fieldDefs.map((f) => (
+                <th key={f.id} style={{ minWidth: 130 }}>{f.label}</th>
+              ))}
               <th>Active</th>
               <th></th>
             </tr>
@@ -148,6 +154,15 @@ export default function FeeStructureEditor({ initialBatches }: { initialBatches:
                   <input className="money-input" type="number" min={0} max={100} step={0.5} value={r.default_scholarship_pct} onChange={(e) => updateRow(idx, { default_scholarship_pct: parseFloat(e.target.value) || 0 })} style={{ textAlign: "right" }} />
                 </td>
                 <td className="amt">{formatINR(r.reg_fee + r.tuition_fee + r.kit_fee)}</td>
+                {fieldDefs.map((f) => (
+                  <td key={f.id}>
+                    <CustomFieldControl
+                      def={f}
+                      value={r.custom_fields?.[f.field_key]}
+                      onChange={(v) => updateRow(idx, { custom_fields: { ...(r.custom_fields || {}), [f.field_key]: v } })}
+                    />
+                  </td>
+                ))}
                 <td>
                   <input type="checkbox" checked={r.active} onChange={(e) => updateRow(idx, { active: e.target.checked })} />
                 </td>

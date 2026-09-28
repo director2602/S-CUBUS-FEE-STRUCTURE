@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { BATCH_GROUP_ORDER, computeFees, formatINR, type Batch } from "@/lib/fee-calc";
+import { cleanCustomFieldValues, type CustomFieldDef } from "@/lib/custom-fields";
+import CustomFieldInputs from "@/components/CustomFieldInputs";
 
 type Student = {
   scid: string;
@@ -50,7 +52,8 @@ export default function CalculatorForm({
   onSaved,
   mode = "create",
   admissionId,
-  initial
+  initial,
+  fieldDefs = []
 }: {
   batches: Batch[];
   counselorId: string;
@@ -58,6 +61,7 @@ export default function CalculatorForm({
   mode?: "create" | "edit";
   admissionId?: string;
   initial?: any;
+  fieldDefs?: CustomFieldDef[];
 }) {
   const supabase = supabaseBrowser();
   const [batchKey, setBatchKey] = useState(initial?.batch_key ?? batches[0]?.key ?? "");
@@ -100,6 +104,12 @@ export default function CalculatorForm({
         }
       : emptyNotes
   );
+  const [customValues, setCustomValues] = useState<Record<string, string>>(() => {
+    const src = initial?.custom_fields || {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(src)) out[k] = v == null ? "" : String(v);
+    return out;
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -176,7 +186,8 @@ export default function CalculatorForm({
       mode3: notes.mode3 || null,
       pdc1: notes.pdc1 || null,
       pdc2: notes.pdc2 || null,
-      remarks: notes.remarks || null
+      remarks: notes.remarks || null,
+      custom_fields: cleanCustomFieldValues(customValues)
     };
 
     const { error } =
@@ -205,6 +216,7 @@ export default function CalculatorForm({
     setRegOverride(null);
     setTuitionOverride(null);
     setKitOverride(null);
+    setCustomValues({});
     onSaved?.();
   }
 
@@ -261,6 +273,11 @@ export default function CalculatorForm({
               <label>Batch commencement</label>
               <input type="date" value={student.batchStart} onChange={(e) => setStudent({ ...student, batchStart: e.target.value })} />
             </div>
+            <CustomFieldInputs
+              defs={fieldDefs}
+              values={customValues}
+              onChange={(key, value) => setCustomValues((prev) => ({ ...prev, [key]: value }))}
+            />
           </div>
         </div>
 

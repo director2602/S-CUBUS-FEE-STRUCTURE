@@ -11,6 +11,7 @@ export type Batch = {
   default_scholarship_pct: number;
   sort_order: number;
   active: boolean;
+  custom_fields?: Record<string, string | number>;
 };
 
 export type FeeInputs = {

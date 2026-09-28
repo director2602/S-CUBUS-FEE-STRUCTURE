@@ -4,15 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import CalculatorForm from "@/components/CalculatorForm";
 import type { Batch } from "@/lib/fee-calc";
+import type { CustomFieldDef } from "@/lib/custom-fields";
 
 export default function EditAdmissionClient({
   admission,
   batches,
-  counselorId
+  counselorId,
+  fieldDefs = []
 }: {
   admission: any;
   batches: Batch[];
   counselorId: string;
+  fieldDefs?: CustomFieldDef[];
 }) {
   const router = useRouter();
 
@@ -32,6 +35,7 @@ export default function EditAdmissionClient({
         mode="edit"
         admissionId={admission.id}
         initial={admission}
+        fieldDefs={fieldDefs}
         onSaved={() => {
           router.push(`/admissions/${admission.id}`);
           router.refresh();

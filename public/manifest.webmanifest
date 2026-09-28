@@ -1,0 +1,13 @@
+{
+  "name": "S-CUBUS Fee Portal",
+  "short_name": "S-CUBUS Fee Portal",
+  "description": "Admission fee calculator, dashboard and Annual Operating Plan for S-CUBUS",
+  "start_url": "/calculator",
+  "display": "standalone",
+  "background_color": "#f6f3ec",
+  "theme_color": "#400c4d",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

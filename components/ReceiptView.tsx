@@ -8,11 +8,23 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { formatINR, type Payment } from "@/lib/fee-calc";
 import SignaturePad, { type SignaturePadHandle } from "@/components/SignaturePad";
 import PaymentsPanel from "@/components/PaymentsPanel";
+import type { CustomFieldDef } from "@/lib/custom-fields";
 
 const PLUM: [number, number, number] = [64, 12, 77];
 const SOFT: [number, number, number] = [107, 101, 88];
 
-export default function ReceiptView({ admission, payments = [] }: { admission: any; payments?: Payment[] }) {
+export default function ReceiptView({
+  admission,
+  payments = [],
+  fieldDefs = []
+}: {
+  admission: any;
+  payments?: Payment[];
+  fieldDefs?: CustomFieldDef[];
+}) {
+  const customEntries = fieldDefs
+    .map((f) => ({ def: f, value: admission.custom_fields?.[f.field_key] }))
+    .filter((e) => e.value !== undefined && e.value !== null && e.value !== "");
   const supabase = supabaseBrowser();
   const router = useRouter();
   const sigRef = useRef<SignaturePadHandle>(null);
@@ -94,6 +106,9 @@ export default function ReceiptView({ admission, payments = [] }: { admission: a
     y = row(doc, y, "Batch", admission.batch_label || "—");
     y = row(doc, y, "Admission date", admission.admission_date || "—");
     y = row(doc, y, "Batch commencement", admission.batch_commencement_date || "—");
+    for (const { def, value } of customEntries) {
+      y = row(doc, y, def.label, String(value));
+    }
 
     y += 4;
     doc.line(18, y, 192, y);
@@ -265,6 +280,21 @@ export default function ReceiptView({ admission, payments = [] }: { admission: a
               <button className="btn secondary small" onClick={handleDownloadSavedCopy}>
                 Download saved copy
               </button>
+            </div>
+          )}
+
+          {customEntries.length > 0 && (
+            <div className="card">
+              <div className="card-head">
+                <span className="kicker">Custom</span>
+                <h2 className="card-title">Additional details</h2>
+              </div>
+              {customEntries.map(({ def, value }) => (
+                <div className="sum-row" key={def.id}>
+                  <span className="sum-label">{def.label}</span>
+                  <span className="sum-val">{String(value)}</span>
+                </div>
+              ))}
             </div>
           )}
 
