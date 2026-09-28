@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
+import { supabaseBrowser } from "@/lib/supabase/client";
 import { BATCH_GROUP_ORDER, formatINR } from "@/lib/fee-calc";
 
 type Row = {
@@ -80,6 +81,7 @@ function toCSV(rows: Row[], counselorNames: Map<string, string>) {
 }
 
 export default function DashboardLedger({ rows, counselors }: { rows: Row[]; counselors: { id: string; name: string }[] }) {
+  const supabase = supabaseBrowser();
   const counselorNames = useMemo(() => new Map(counselors.map((c) => [c.id, c.name])), [counselors]);
 
   const [counselorFilter, setCounselorFilter] = useState("all");
@@ -92,10 +94,42 @@ export default function DashboardLedger({ rows, counselors }: { rows: Row[]; cou
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const liveRows = useMemo(() => rows.filter((r) => !deletedIds.has(r.id)), [rows, deletedIds]);
+
+  async function handleDelete(r: Row) {
+    const ok = window.confirm(
+      `Delete ${r.student_name}${r.scid ? ` (SCID ${r.scid})` : ""} and every payment recorded for them?\n\nThis permanently removes their admission record, fee breakdown and payment history — it cannot be undone.`
+    );
+    if (!ok) return;
+    setDeletingId(r.id);
+    setDeleteError(null);
+    if (r.pdf_path) {
+      // Best-effort cleanup of the saved PDF copy — don't block the delete if this fails.
+      await supabase.storage.from("fee-receipts").remove([r.pdf_path]).catch(() => {});
+    }
+    const { error } = await supabase.from("admissions").delete().eq("id", r.id);
+    setDeletingId(null);
+    if (error) {
+      setDeleteError(error.message);
+      return;
+    }
+    setDeletedIds((prev) => new Set(prev).add(r.id));
+    setSelected((prev) => {
+      if (!prev.has(r.id)) return prev;
+      const next = new Set(prev);
+      next.delete(r.id);
+      return next;
+    });
+    if (expandedId === r.id) setExpandedId(null);
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let out = rows.filter((r) => {
+    let out = liveRows.filter((r) => {
       if (counselorFilter !== "all" && r.counselor_id !== counselorFilter) return false;
       if (groupFilter !== "all" && r.batch_group !== groupFilter) return false;
       if (statusFilter !== "all" && r.billing_status !== statusFilter) return false;
@@ -117,7 +151,7 @@ export default function DashboardLedger({ rows, counselors }: { rows: Row[]; cou
       return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
     });
     return out;
-  }, [rows, counselorFilter, groupFilter, statusFilter, query, dateFrom, dateTo, sortKey, sortDir]);
+  }, [liveRows, counselorFilter, groupFilter, statusFilter, query, dateFrom, dateTo, sortKey, sortDir]);
 
   const selectedRows = useMemo(() => filtered.filter((r) => selected.has(r.id)), [filtered, selected]);
   const summaryRows = selectedRows.length > 0 ? selectedRows : filtered;
@@ -283,6 +317,8 @@ export default function DashboardLedger({ rows, counselors }: { rows: Row[]; cou
         </div>
       </div>
 
+      {deleteError && <div className="error-text" style={{ marginBottom: 14 }}>{deleteError}</div>}
+
       {filtered.length === 0 ? (
         <p className="comp-hint">No admissions match these filters.</p>
       ) : (
@@ -392,9 +428,19 @@ export default function DashboardLedger({ rows, counselors }: { rows: Row[]; cou
                             </div>
                           )}
                         </div>
-                        <Link className="btn secondary small" href={`/admissions/${r.id}`} style={{ margin: "0 4px" }}>
-                          Open full record &rarr;
-                        </Link>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 4px" }}>
+                          <Link className="btn secondary small" href={`/admissions/${r.id}`}>
+                            Open full record &rarr;
+                          </Link>
+                          <button
+                            className="reset-btn"
+                            style={{ color: "var(--bad-fg)" }}
+                            disabled={deletingId === r.id}
+                            onClick={() => handleDelete(r)}
+                          >
+                            {deletingId === r.id ? "Deleting…" : "Delete student & all details"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )}

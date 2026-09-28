@@ -268,13 +268,15 @@ export default function ReceiptView({ admission, payments = [] }: { admission: a
             </div>
           )}
 
-          <PaymentsPanel
-            admissionId={admission.id}
-            counselorId={admission.counselor_id}
-            initialPayments={payments}
-            baseAmount={admission.actual_fees_paid}
-            onChanged={() => router.refresh()}
-          />
+          <div id="payments" style={{ scrollMarginTop: 20 }}>
+            <PaymentsPanel
+              admissionId={admission.id}
+              counselorId={admission.counselor_id}
+              initialPayments={payments}
+              baseAmount={admission.actual_fees_paid}
+              onChanged={() => router.refresh()}
+            />
+          </div>
         </div>
 
         <div className="stack">

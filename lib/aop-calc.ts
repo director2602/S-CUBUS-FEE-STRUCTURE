@@ -129,7 +129,6 @@ export function computePlan(a: Assumptions): PlanResult {
 
   const prevYearRevenue = revenue / (1 + a.growthRate / 100);
 
-  const revForPct = revenue || 1;
   const segments = [
     ["Teaching & academic", teaching],
     ["Marketing & admissions", marketing],
@@ -141,7 +140,9 @@ export function computePlan(a: Assumptions): PlanResult {
   ].map(([label, value]) => ({
     label: label as string,
     value: value as number,
-    pctOfRevenue: Math.round(((value as number) / revForPct) * 1000) / 10
+    // Guard against dividing by a substituted 1 when revenue is 0 (e.g. average fee not
+    // set yet) — without this, a fixed cost like rent renders as a nonsensical percentage.
+    pctOfRevenue: revenue ? Math.round(((value as number) / revenue) * 1000) / 10 : 0
   }));
 
   const months: MonthPlan[] = MONTH_WEIGHTS.map((w, i) => {

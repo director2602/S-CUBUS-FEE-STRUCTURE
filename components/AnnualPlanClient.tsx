@@ -1006,6 +1006,20 @@ export default function AnnualPlanClient(props: Props) {
           ) : (
             <p className="comp-hint">No admissions recorded yet for FY {props.fiscalYear} — actual revenue will appear here automatically once they are.</p>
           )}
+
+          <div style={{ height: 32 }} />
+
+          <div className="card-head">
+            <span className="kicker">Month by month</span>
+            <h2 className="card-title">Plan vs actual, FY {props.fiscalYear}</h2>
+          </div>
+          <p className="comp-hint" style={{ marginBottom: 16 }}>
+            Actual revenue comes straight from every admission and payment recorded in the Fee Calculator, bucketed by fiscal month; actual
+            EBITDA also reflects the costs entered above.
+          </p>
+          <PeriodChart rows={monthlyRows} />
+          <div style={{ height: 20 }} />
+          <PeriodTable rows={monthlyRows} />
         </div>
       )}
     </>
