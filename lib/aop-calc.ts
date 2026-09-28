@@ -52,6 +52,80 @@ export type ActualRevenueRow = {
   revenue: number;
 };
 
+// --- Company-wide & per-counselor target vs actual (CFO overview) ---
+
+export type CounselorTarget = {
+  counselorId: string;
+  targetStudents: number;
+  targetRevenue: number;
+};
+
+export type AdmissionActual = {
+  counselorId: string;
+  actualPayable: number;
+  totalPaid: number;
+  outstanding: number;
+};
+
+export type CounselorPerformance = {
+  counselorId: string;
+  name: string;
+  targetStudents: number;
+  targetRevenue: number;
+  actualStudents: number;
+  actualBooked: number;
+  actualCollected: number;
+  actualOutstanding: number;
+  studentsAchievedPct: number | null;
+  revenueAchievedPct: number | null;
+};
+
+// Aggregates this fiscal year's admissions by counselor, joins each counselor's saved
+// target (if any) and their profile name, and computes achievement % for appraisal.
+export function computeCounselorPerformance(
+  admissions: AdmissionActual[],
+  targets: CounselorTarget[],
+  counselors: { id: string; name: string }[]
+): CounselorPerformance[] {
+  const byCounselor = new Map<string, { students: number; booked: number; collected: number; outstanding: number }>();
+  admissions.forEach((a) => {
+    const cur = byCounselor.get(a.counselorId) || { students: 0, booked: 0, collected: 0, outstanding: 0 };
+    cur.students += 1;
+    cur.booked += a.actualPayable;
+    cur.collected += a.totalPaid;
+    cur.outstanding += Math.max(0, a.outstanding);
+    byCounselor.set(a.counselorId, cur);
+  });
+  const targetMap = new Map(targets.map((t) => [t.counselorId, t]));
+  const nameMap = new Map(counselors.map((c) => [c.id, c.name]));
+
+  // Every counselor who has a profile, a saved target, or at least one admission this
+  // year shows up — so a counselor with zero admissions still appears (at 0%), which
+  // matters for an honest appraisal view.
+  const ids = new Set<string>([...counselors.map((c) => c.id), ...targets.map((t) => t.counselorId), ...byCounselor.keys()]);
+
+  return [...ids]
+    .map((id) => {
+      const actual = byCounselor.get(id) || { students: 0, booked: 0, collected: 0, outstanding: 0 };
+      const target = targetMap.get(id);
+      const targetStudents = target?.targetStudents || 0;
+      const targetRevenue = target?.targetRevenue || 0;
+      return {
+        counselorId: id,
+        name: nameMap.get(id) || "Unassigned",
+        targetStudents,
+        targetRevenue,
+        actualStudents: actual.students,
+        actualBooked: actual.booked,
+        actualCollected: actual.collected,
+        actualOutstanding: actual.outstanding,
+        studentsAchievedPct: targetStudents ? Math.round((actual.students / targetStudents) * 1000) / 10 : null,
+        revenueAchievedPct: targetRevenue ? Math.round((actual.collected / targetRevenue) * 1000) / 10 : null
+      };
+    })
+    .sort((a, b) => b.actualCollected - a.actualCollected);
+}
+
 export function round0(n: number) {
   return Math.round(n);
 }

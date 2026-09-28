@@ -6,7 +6,9 @@ import {
   fiscalMonthIndex,
   type Assumptions,
   type StaffRow,
-  type ActualCostRow
+  type ActualCostRow,
+  type CounselorTarget,
+  type AdmissionActual
 } from "@/lib/aop-calc";
 
 function fyBounds(fy: string) {
@@ -19,14 +21,25 @@ export default async function AnnualPlanPage() {
   const fiscalYear = currentFiscalYear();
   const { start, end } = fyBounds(fiscalYear);
 
-  const [{ data: assumptionsRow }, { data: staffRows }, { data: actualCostRows }, { data: admissionRows }, { data: paymentRows }] =
-    await Promise.all([
-      supabase.from("aop_assumptions").select("*").eq("fiscal_year", fiscalYear).maybeSingle(),
-      supabase.from("aop_staff").select("*").eq("fiscal_year", fiscalYear).order("sort_order"),
-      supabase.from("aop_actual_costs").select("*").eq("fiscal_year", fiscalYear),
-      supabase.from("admissions").select("admission_date, actual_fees_paid").gte("admission_date", start).lte("admission_date", end),
-      supabase.from("payments").select("paid_on, amount").gte("paid_on", start).lte("paid_on", end)
-    ]);
+  const [
+    { data: assumptionsRow },
+    { data: staffRows },
+    { data: actualCostRows },
+    { data: admissionRows },
+    { data: paymentRows },
+    { data: counselorTargetRows },
+    { data: counselorProfiles },
+    { data: fyAdmissions }
+  ] = await Promise.all([
+    supabase.from("aop_assumptions").select("*").eq("fiscal_year", fiscalYear).maybeSingle(),
+    supabase.from("aop_staff").select("*").eq("fiscal_year", fiscalYear).order("sort_order"),
+    supabase.from("aop_actual_costs").select("*").eq("fiscal_year", fiscalYear),
+    supabase.from("admissions").select("admission_date, actual_fees_paid").gte("admission_date", start).lte("admission_date", end),
+    supabase.from("payments").select("paid_on, amount").gte("paid_on", start).lte("paid_on", end),
+    supabase.from("aop_counselor_targets").select("*").eq("fiscal_year", fiscalYear),
+    supabase.from("profiles").select("id, full_name, email").eq("role", "counselor"),
+    supabase.from("admissions_computed").select("counselor_id, actual_payable, total_paid, outstanding").gte("admission_date", start).lte("admission_date", end)
+  ]);
 
   const assumptions: Assumptions = assumptionsRow
     ? {
@@ -73,6 +86,24 @@ export default async function AnnualPlanPage() {
   ((admissionRows as any[]) || []).forEach((r) => addRevenue(r.admission_date, Number(r.actual_fees_paid || 0)));
   ((paymentRows as any[]) || []).forEach((r) => addRevenue(r.paid_on, Number(r.amount || 0)));
 
+  const counselors = ((counselorProfiles as any[]) || []).map((p) => ({ id: p.id, name: p.full_name || p.email }));
+
+  const counselorTargets: CounselorTarget[] = ((counselorTargetRows as any[]) || []).map((r) => ({
+    counselorId: r.counselor_id,
+    targetStudents: Number(r.target_students),
+    targetRevenue: Number(r.target_revenue)
+  }));
+
+  // Every admission made this fiscal year — the same "actual" data the calculator itself
+  // computes (actual_payable, total_paid, outstanding) — used both for the company-wide
+  // target-vs-actual overview and the per-counselor performance comparison.
+  const fyAdmissionActuals: AdmissionActual[] = ((fyAdmissions as any[]) || []).map((r) => ({
+    counselorId: r.counselor_id,
+    actualPayable: Number(r.actual_payable || 0),
+    totalPaid: Number(r.total_paid || 0),
+    outstanding: Number(r.outstanding || 0)
+  }));
+
   return (
     <AnnualPlanClient
       fiscalYear={fiscalYear}
@@ -81,6 +112,9 @@ export default async function AnnualPlanPage() {
       initialStaff={staff}
       initialActualCosts={actualCosts}
       actualRevenueByMonth={[...revenueByMonth.entries()]}
+      counselors={counselors}
+      initialCounselorTargets={counselorTargets}
+      fyAdmissionActuals={fyAdmissionActuals}
     />
   );
 }

@@ -7,6 +7,8 @@ import {
   type Assumptions,
   type StaffRow,
   type ActualCostRow,
+  type CounselorTarget,
+  type AdmissionActual,
   formatINR,
   pct1,
   variance,
@@ -18,6 +20,7 @@ import {
   getQuarterlyRows,
   getWeeklyRows,
   computePayroll,
+  computeCounselorPerformance,
   executiveSummary
 } from "@/lib/aop-calc";
 
@@ -27,6 +30,10 @@ const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300
 const COST_COLOR = "#2a78d6";
 const PROFIT_COLOR = "#008300";
 const LOSS_COLOR = "#d03b3b";
+// Target/Actual is a 2-series comparison used across the CFO overview & counselor charts —
+// identity (which counselor, which line item) is carried by the axis label, not by color.
+const TARGET_COLOR = "#2a78d6";
+const ACTUAL_COLOR = "#008300";
 
 type Msg = { type: "error" | "success"; text: string } | null;
 
@@ -151,6 +158,64 @@ function PnLTable({ plan }: { plan: PlanResult }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function HBarGroup({
+  items,
+  formatter
+}: {
+  items: { label: string; value: number; color: string }[];
+  formatter: (n: number) => string;
+}) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return (
+    <div>
+      {items.map((it) => (
+        <div className="hbar-row" key={it.label}>
+          <div className="hbar-label">{it.label}</div>
+          <div className="hbar-track">
+            <div className="hbar-fill" style={{ width: `${Math.max(2, (it.value / max) * 100)}%`, background: it.color }} />
+          </div>
+          <div className="hbar-value">{formatter(it.value)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function achieveClass(pct: number | null) {
+  if (pct == null) return undefined;
+  return pct >= 100 ? "achieve-good" : pct >= 60 ? "achieve-warn" : "achieve-bad";
+}
+
+function CompareRow({
+  label,
+  hint,
+  target,
+  actual,
+  achievedPct,
+  formatter
+}: {
+  label: string;
+  hint?: string;
+  target: number | null;
+  actual: number;
+  achievedPct: number | null;
+  formatter: (n: number) => string;
+}) {
+  return (
+    <tr>
+      <td>
+        {label}
+        {hint && <div className="comp-hint">{hint}</div>}
+      </td>
+      <td className="amt">{target != null ? formatter(target) : "—"}</td>
+      <td className="amt" style={{ fontWeight: 700 }}>
+        {formatter(actual)}
+      </td>
+      <td className={`amt ${achieveClass(achievedPct) || ""}`}>{achievedPct != null ? pct1(achievedPct) : "—"}</td>
+    </tr>
   );
 }
 
@@ -309,11 +374,14 @@ type Props = {
   initialStaff: StaffRow[];
   initialActualCosts: ActualCostRow[];
   actualRevenueByMonth: [number, number][];
+  counselors: { id: string; name: string }[];
+  initialCounselorTargets: CounselorTarget[];
+  fyAdmissionActuals: AdmissionActual[];
 };
 
 export default function AnnualPlanClient(props: Props) {
   const supabase = supabaseBrowser();
-  const [tab, setTab] = useState<"overview" | "staffing" | "reports" | "actuals">("overview");
+  const [tab, setTab] = useState<"overview" | "staffing" | "reports" | "actuals" | "counselors">("overview");
 
   // --- Assumptions ---
   const [assumptions, setAssumptions] = useState<Assumptions>(props.initialAssumptions);
@@ -498,6 +566,48 @@ export default function AnnualPlanClient(props: Props) {
     setActualsMsg({ type: "success", text: `Saved actual costs for ${dirty.length} month${dirty.length === 1 ? "" : "s"}.` });
   }
 
+  // --- Counselor targets (owner sets, for appraisal against actual admissions) ---
+  const [counselorTargets, setCounselorTargets] = useState<Record<string, { targetStudents: number; targetRevenue: number }>>(() => {
+    const map: Record<string, { targetStudents: number; targetRevenue: number }> = {};
+    props.counselors.forEach((c) => {
+      map[c.id] = { targetStudents: 0, targetRevenue: 0 };
+    });
+    props.initialCounselorTargets.forEach((t) => {
+      map[t.counselorId] = { targetStudents: t.targetStudents, targetRevenue: t.targetRevenue };
+    });
+    return map;
+  });
+  const [dirtyCounselors, setDirtyCounselors] = useState<Set<string>>(new Set());
+  const [counselorTargetsSaving, setCounselorTargetsSaving] = useState(false);
+  const [counselorTargetsMsg, setCounselorTargetsMsg] = useState<Msg>(null);
+
+  function updateCounselorTarget(id: string, patch: Partial<{ targetStudents: number; targetRevenue: number }>) {
+    setCounselorTargets((prev) => ({ ...prev, [id]: { ...(prev[id] || { targetStudents: 0, targetRevenue: 0 }), ...patch } }));
+    setDirtyCounselors((prev) => new Set(prev).add(id));
+    setCounselorTargetsMsg(null);
+  }
+
+  async function saveCounselorTargets() {
+    const dirty = [...dirtyCounselors];
+    if (!dirty.length) return;
+    setCounselorTargetsSaving(true);
+    setCounselorTargetsMsg(null);
+    const payload = dirty.map((id) => ({
+      fiscal_year: props.fiscalYear,
+      counselor_id: id,
+      target_students: counselorTargets[id]?.targetStudents || 0,
+      target_revenue: counselorTargets[id]?.targetRevenue || 0
+    }));
+    const { error } = await supabase.from("aop_counselor_targets").upsert(payload, { onConflict: "fiscal_year,counselor_id" });
+    setCounselorTargetsSaving(false);
+    if (error) {
+      setCounselorTargetsMsg({ type: "error", text: error.message });
+      return;
+    }
+    setDirtyCounselors(new Set());
+    setCounselorTargetsMsg({ type: "success", text: `Saved targets for ${dirty.length} counselor${dirty.length === 1 ? "" : "s"}.` });
+  }
+
   // --- Derived plan / payroll / reports ---
   const plan = useMemo(() => computePlan(assumptions), [assumptions]);
   const payroll = useMemo(() => computePayroll(staff, plan.revenue), [staff, plan.revenue]);
@@ -571,6 +681,41 @@ export default function AnnualPlanClient(props: Props) {
 
   const payrollVsPlan = payroll.headcount ? variance(payroll.totalAnnual, plan.teaching + plan.admin) : null;
 
+  // --- Company-wide target vs actual (CFO overview) — actuals fetched straight from the
+  // Fee Calculator: every admission and payment made this fiscal year. ---
+  const companyActual = useMemo(() => {
+    const students = props.fyAdmissionActuals.length;
+    const booked = props.fyAdmissionActuals.reduce((s, a) => s + a.actualPayable, 0);
+    const collected = props.fyAdmissionActuals.reduce((s, a) => s + a.totalPaid, 0);
+    const outstanding = props.fyAdmissionActuals.reduce((s, a) => s + Math.max(0, a.outstanding), 0);
+    return { students, booked, collected, outstanding };
+  }, [props.fyAdmissionActuals]);
+
+  const actualCostsTotal = useMemo(
+    () => costRows.reduce((s, r) => s + r.teachingCost + r.marketingCost + r.adminCost + r.rent + r.otherOverheads, 0),
+    [costRows]
+  );
+  const actualEbitdaCash = companyActual.collected - actualCostsTotal;
+
+  const studentsAchievedPct = assumptions.students ? Math.round((companyActual.students / assumptions.students) * 1000) / 10 : null;
+  const revenueBookedAchievedPct = plan.revenue ? Math.round((companyActual.booked / plan.revenue) * 1000) / 10 : null;
+  const revenueCollectedAchievedPct = plan.revenue ? Math.round((companyActual.collected / plan.revenue) * 1000) / 10 : null;
+  const ebitdaAchievedPct = plan.ebitda ? Math.round((actualEbitdaCash / plan.ebitda) * 1000) / 10 : null;
+
+  const counselorTargetsList: CounselorTarget[] = useMemo(
+    () =>
+      props.counselors.map((c) => ({
+        counselorId: c.id,
+        targetStudents: counselorTargets[c.id]?.targetStudents || 0,
+        targetRevenue: counselorTargets[c.id]?.targetRevenue || 0
+      })),
+    [props.counselors, counselorTargets]
+  );
+  const counselorPerformance = useMemo(
+    () => computeCounselorPerformance(props.fyAdmissionActuals, counselorTargetsList, props.counselors),
+    [props.fyAdmissionActuals, counselorTargetsList, props.counselors]
+  );
+
   return (
     <>
       <p className="lede">
@@ -585,7 +730,8 @@ export default function AnnualPlanClient(props: Props) {
             ["overview", "Overview"],
             ["staffing", "Staffing & Payroll"],
             ["reports", "Reports"],
-            ["actuals", "Actual vs Plan"]
+            ["actuals", "Actual vs Plan"],
+            ["counselors", "Counselor Performance"]
           ] as const
         ).map(([key, label]) => (
           <button key={key} className={`tab-btn${tab === key ? " active" : ""}`} onClick={() => setTab(key)}>
@@ -596,6 +742,127 @@ export default function AnnualPlanClient(props: Props) {
 
       {tab === "overview" && (
         <>
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-head">
+              <span className="kicker">CFO overview</span>
+              <h2 className="card-title">Target vs actual, FY {props.fiscalYear}</h2>
+            </div>
+            <p className="comp-hint" style={{ marginBottom: 16 }}>
+              Targets are the assumptions you set below (e.g. {assumptions.students.toLocaleString("en-IN")} students at{" "}
+              {formatINR(assumptions.avgFee)} average fee). Actuals are fetched live from every admission and payment recorded in the Fee
+              Calculator this fiscal year.
+            </p>
+
+            <div style={{ overflowX: "auto", marginBottom: 20 }}>
+              <table className="data compare-table" style={{ minWidth: 640 }}>
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th style={{ textAlign: "right" }}>Target</th>
+                    <th style={{ textAlign: "right" }}>Actual</th>
+                    <th style={{ textAlign: "right" }}>Achieved</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <CompareRow
+                    label="Students admitted"
+                    target={assumptions.students}
+                    actual={companyActual.students}
+                    achievedPct={studentsAchievedPct}
+                    formatter={(n) => n.toLocaleString("en-IN")}
+                  />
+                  <CompareRow
+                    label="Revenue booked"
+                    hint="Total fee payable across every admission made this year"
+                    target={plan.revenue}
+                    actual={companyActual.booked}
+                    achievedPct={revenueBookedAchievedPct}
+                    formatter={formatINR}
+                  />
+                  <CompareRow
+                    label="Revenue collected"
+                    hint="Actually received so far — registration + every installment logged"
+                    target={plan.revenue}
+                    actual={companyActual.collected}
+                    achievedPct={revenueCollectedAchievedPct}
+                    formatter={formatINR}
+                  />
+                  <CompareRow
+                    label="Yet to be collected"
+                    hint="Outstanding balance across every admission made this year"
+                    target={null}
+                    actual={companyActual.outstanding}
+                    achievedPct={null}
+                    formatter={formatINR}
+                  />
+                  <CompareRow
+                    label="EBITDA (cash)"
+                    hint="Revenue collected minus actual costs entered in Actual vs Plan"
+                    target={plan.ebitda}
+                    actual={actualEbitdaCash}
+                    achievedPct={ebitdaAchievedPct}
+                    formatter={formatINR}
+                  />
+                </tbody>
+              </table>
+            </div>
+
+            <div className="grid-2">
+              <div>
+                <div className="comp-hint" style={{ marginBottom: 10, fontWeight: 600, color: "var(--ink)" }}>
+                  Revenue: target vs booked vs collected
+                </div>
+                <HBarGroup
+                  formatter={formatINR}
+                  items={[
+                    { label: "Target", value: plan.revenue, color: "#2a78d6" },
+                    { label: "Booked", value: companyActual.booked, color: "#eb6834" },
+                    { label: "Collected", value: companyActual.collected, color: "#1baf7a" }
+                  ]}
+                />
+                <div className="legend" style={{ marginTop: 8 }}>
+                  <div className="legend-item">
+                    <span className="legend-swatch" style={{ background: "#2a78d6" }} />
+                    <span className="legend-label">Target</span>
+                  </div>
+                  <div className="legend-item">
+                    <span className="legend-swatch" style={{ background: "#eb6834" }} />
+                    <span className="legend-label">Booked</span>
+                  </div>
+                  <div className="legend-item">
+                    <span className="legend-swatch" style={{ background: "#1baf7a" }} />
+                    <span className="legend-label">Collected</span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="comp-hint" style={{ marginBottom: 10, fontWeight: 600, color: "var(--ink)" }}>
+                  Students: target vs admitted
+                </div>
+                <HBarGroup
+                  formatter={(n) => n.toLocaleString("en-IN")}
+                  items={[
+                    { label: "Target", value: assumptions.students, color: TARGET_COLOR },
+                    { label: "Admitted", value: companyActual.students, color: ACTUAL_COLOR }
+                  ]}
+                />
+                <div className="legend" style={{ marginTop: 8 }}>
+                  <div className="legend-item">
+                    <span className="legend-swatch" style={{ background: TARGET_COLOR }} />
+                    <span className="legend-label">Target</span>
+                  </div>
+                  <div className="legend-item">
+                    <span className="legend-swatch" style={{ background: ACTUAL_COLOR }} />
+                    <span className="legend-label">Admitted</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="comp-hint" style={{ marginBottom: 10, fontWeight: 600, color: "var(--ink)" }}>
+            Full-year target (from assumptions below)
+          </div>
           <div className="kpi-grid" style={{ marginBottom: 24 }}>
             <div className="kpi">
               <div className="kpi-label">Revenue</div>
@@ -1020,6 +1287,151 @@ export default function AnnualPlanClient(props: Props) {
           <PeriodChart rows={monthlyRows} />
           <div style={{ height: 20 }} />
           <PeriodTable rows={monthlyRows} />
+        </div>
+      )}
+
+      {tab === "counselors" && (
+        <div className="card">
+          <div className="card-head">
+            <span className="kicker">Appraisal</span>
+            <h2 className="card-title">Counselor performance, FY {props.fiscalYear}</h2>
+          </div>
+
+          {props.counselors.length === 0 ? (
+            <p className="comp-hint">
+              No counselor accounts yet — invite counselors from the Counselors page, then set their targets here.
+            </p>
+          ) : (
+            <>
+              <p className="comp-hint" style={{ marginBottom: 16 }}>
+                Set each counselor&apos;s target for the year, then compare it against admissions they&apos;ve actually logged in the
+                calculator — the same numbers you&apos;d use for an appraisal.
+              </p>
+
+              <div style={{ overflowX: "auto", marginBottom: 16 }}>
+                <table className="data" style={{ minWidth: 520 }}>
+                  <thead>
+                    <tr>
+                      <th>Counselor</th>
+                      <th style={{ textAlign: "right" }}>Target students</th>
+                      <th style={{ textAlign: "right" }}>Target revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {props.counselors.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.name}</td>
+                        <td>
+                          <input
+                            className="money-input"
+                            type="number"
+                            min={0}
+                            value={counselorTargets[c.id]?.targetStudents ?? 0}
+                            onChange={(e) => updateCounselorTarget(c.id, { targetStudents: parseFloat(e.target.value) || 0 })}
+                            style={{ textAlign: "right" }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="money-input"
+                            type="number"
+                            min={0}
+                            value={counselorTargets[c.id]?.targetRevenue ?? 0}
+                            onChange={(e) => updateCounselorTarget(c.id, { targetRevenue: parseFloat(e.target.value) || 0 })}
+                            style={{ textAlign: "right" }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {counselorTargetsMsg && (
+                <div className={counselorTargetsMsg.type === "error" ? "error-text" : "success-text"} style={{ marginBottom: 12 }}>
+                  {counselorTargetsMsg.text}
+                </div>
+              )}
+              <button className="btn" onClick={saveCounselorTargets} disabled={counselorTargetsSaving || dirtyCounselors.size === 0}>
+                {counselorTargetsSaving
+                  ? "Saving…"
+                  : dirtyCounselors.size > 0
+                  ? `Save ${dirtyCounselors.size} target${dirtyCounselors.size === 1 ? "" : "s"}`
+                  : "No changes to save"}
+              </button>
+
+              <div style={{ height: 32 }} />
+
+              <div className="card-head">
+                <span className="kicker">Comparison</span>
+                <h2 className="card-title">Target vs actual, by counselor</h2>
+              </div>
+
+              <div style={{ overflowX: "auto", marginBottom: 24 }}>
+                <table className="data compare-table" style={{ minWidth: 820 }}>
+                  <thead>
+                    <tr>
+                      <th>Counselor</th>
+                      <th style={{ textAlign: "right" }}>Target students</th>
+                      <th style={{ textAlign: "right" }}>Admissions</th>
+                      <th style={{ textAlign: "right" }}>Achieved</th>
+                      <th style={{ textAlign: "right" }}>Target revenue</th>
+                      <th style={{ textAlign: "right" }}>Collected</th>
+                      <th style={{ textAlign: "right" }}>Achieved</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {counselorPerformance.map((r) => (
+                      <tr key={r.counselorId}>
+                        <td>{r.name}</td>
+                        <td className="amt">{r.targetStudents || "—"}</td>
+                        <td className="amt" style={{ fontWeight: 700 }}>
+                          {r.actualStudents}
+                        </td>
+                        <td className={`amt ${achieveClass(r.studentsAchievedPct) || ""}`}>
+                          {r.studentsAchievedPct != null ? pct1(r.studentsAchievedPct) : "—"}
+                        </td>
+                        <td className="amt">{r.targetRevenue ? formatINR(r.targetRevenue) : "—"}</td>
+                        <td className="amt" style={{ fontWeight: 700 }}>
+                          {formatINR(r.actualCollected)}
+                        </td>
+                        <td className={`amt ${achieveClass(r.revenueAchievedPct) || ""}`}>
+                          {r.revenueAchievedPct != null ? pct1(r.revenueAchievedPct) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="card-head">
+                <span className="kicker">Visual</span>
+                <h2 className="card-title">Students: target vs admitted, by counselor</h2>
+              </div>
+              {counselorPerformance.map((r) => (
+                <div key={r.counselorId} style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{r.name}</div>
+                  <HBarGroup
+                    formatter={(n) => n.toLocaleString("en-IN")}
+                    items={[
+                      { label: "Target", value: r.targetStudents, color: TARGET_COLOR },
+                      { label: "Admitted", value: r.actualStudents, color: ACTUAL_COLOR }
+                    ]}
+                  />
+                </div>
+              ))}
+              <div className="legend">
+                <div className="legend-item">
+                  <span className="legend-swatch" style={{ background: TARGET_COLOR }} />
+                  <span className="legend-label">Target students</span>
+                </div>
+                <div className="legend-item">
+                  <span className="legend-swatch" style={{ background: ACTUAL_COLOR }} />
+                  <span className="legend-label">Actual admissions</span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </>

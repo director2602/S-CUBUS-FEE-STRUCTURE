@@ -594,6 +594,57 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
+.hbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.hbar-label {
+  width: 170px;
+  flex: none;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.hbar-track {
+  flex: 1;
+  background: var(--line);
+  border-radius: 6px;
+  height: 20px;
+  overflow: hidden;
+}
+
+.hbar-fill {
+  height: 100%;
+  border-radius: 6px 0 0 6px;
+}
+
+.hbar-value {
+  width: 130px;
+  flex: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.compare-table td.achieve-good {
+  color: var(--good-fg);
+  font-weight: 700;
+}
+
+.compare-table td.achieve-warn {
+  color: var(--warn-fg);
+  font-weight: 700;
+}
+
+.compare-table td.achieve-bad {
+  color: var(--bad-fg);
+  font-weight: 700;
+}
+
 @media print {
   .topbar,
   .no-print {
