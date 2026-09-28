@@ -11,34 +11,30 @@ import {
   type AdmissionActual
 } from "@/lib/aop-calc";
 
-function fyBounds(fy: string) {
-  const startYear = parseInt(fy.split("-")[0], 10);
-  return { start: `${startYear}-04-01`, end: `${startYear + 1}-03-31` };
-}
-
 export default async function AnnualPlanPage() {
   const supabase = supabaseServer();
   const fiscalYear = currentFiscalYear();
-  const { start, end } = fyBounds(fiscalYear);
 
   const [
     { data: assumptionsRow },
     { data: staffRows },
     { data: actualCostRows },
-    { data: admissionRows },
     { data: paymentRows },
     { data: counselorTargetRows },
     { data: counselorProfiles },
-    { data: fyAdmissions }
+    { data: allAdmissions }
   ] = await Promise.all([
     supabase.from("aop_assumptions").select("*").eq("fiscal_year", fiscalYear).maybeSingle(),
     supabase.from("aop_staff").select("*").eq("fiscal_year", fiscalYear).order("sort_order"),
     supabase.from("aop_actual_costs").select("*").eq("fiscal_year", fiscalYear),
-    supabase.from("admissions").select("admission_date, actual_fees_paid").gte("admission_date", start).lte("admission_date", end),
-    supabase.from("payments").select("paid_on, amount").gte("paid_on", start).lte("paid_on", end),
+    supabase.from("payments").select("paid_on, amount"),
     supabase.from("aop_counselor_targets").select("*").eq("fiscal_year", fiscalYear),
     supabase.from("profiles").select("id, full_name, email").eq("role", "counselor"),
-    supabase.from("admissions_computed").select("counselor_id, actual_payable, total_paid, outstanding").gte("admission_date", start).lte("admission_date", end)
+    // Fetched unfiltered (not .gte/.lte on admission_date) and bucketed into the fiscal year
+    // below instead — a null admission_date would otherwise silently drop that admission out
+    // of a database-side date-range filter, so an older record that was saved without one
+    // still counts here, falling back to when the record was created.
+    supabase.from("admissions_computed").select("counselor_id, admission_date, created_at, actual_fees_paid, actual_payable, total_paid, outstanding")
   ]);
 
   const assumptions: Assumptions = assumptionsRow
@@ -72,8 +68,15 @@ export default async function AnnualPlanPage() {
     otherOverheads: Number(r.other_overheads)
   }));
 
+  // An admission's own admission_date is the source of truth for which fiscal year it
+  // belongs to; if that was left blank when it was saved, fall back to the row's created_at
+  // (the date it was actually entered) rather than silently excluding it everywhere.
+  const effectiveDate = (r: { admission_date: string | null; created_at: string | null }) => r.admission_date || r.created_at?.slice(0, 10) || null;
+
+  const fyRows = ((allAdmissions as any[]) || []).filter((r) => fiscalMonthIndex(effectiveDate(r) || "", fiscalYear) != null);
+
   // Auto-pull actual revenue from real fee data: the amount collected at admission
-  // (bucketed by admission_date) plus every later installment logged in `payments`
+  // (bucketed by its effective date) plus every later installment logged in `payments`
   // (bucketed by its own paid_on date) — both mapped into this fiscal year's 0..11
   // month index (0 = Apr … 11 = Mar).
   const revenueByMonth = new Map<number, number>();
@@ -83,7 +86,7 @@ export default async function AnnualPlanPage() {
     if (idx == null) return;
     revenueByMonth.set(idx, (revenueByMonth.get(idx) || 0) + amount);
   };
-  ((admissionRows as any[]) || []).forEach((r) => addRevenue(r.admission_date, Number(r.actual_fees_paid || 0)));
+  fyRows.forEach((r) => addRevenue(effectiveDate(r), Number(r.actual_fees_paid || 0)));
   ((paymentRows as any[]) || []).forEach((r) => addRevenue(r.paid_on, Number(r.amount || 0)));
 
   const counselors = ((counselorProfiles as any[]) || []).map((p) => ({ id: p.id, name: p.full_name || p.email }));
@@ -97,7 +100,7 @@ export default async function AnnualPlanPage() {
   // Every admission made this fiscal year — the same "actual" data the calculator itself
   // computes (actual_payable, total_paid, outstanding) — used both for the company-wide
   // target-vs-actual overview and the per-counselor performance comparison.
-  const fyAdmissionActuals: AdmissionActual[] = ((fyAdmissions as any[]) || []).map((r) => ({
+  const fyAdmissionActuals: AdmissionActual[] = fyRows.map((r) => ({
     counselorId: r.counselor_id,
     actualPayable: Number(r.actual_payable || 0),
     totalPaid: Number(r.total_paid || 0),

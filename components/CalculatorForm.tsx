@@ -26,6 +26,10 @@ type Notes = {
   remarks: string;
 };
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const emptyStudent: Student = {
   scid: "",
   name: "",
@@ -34,7 +38,7 @@ const emptyStudent: Student = {
   email: "",
   phone1: "",
   phone2: "",
-  admissionDate: "",
+  admissionDate: todayISO(),
   batchStart: ""
 };
 
@@ -74,7 +78,11 @@ export default function CalculatorForm({
           email: initial.email ?? "",
           phone1: initial.phone1 ?? "",
           phone2: initial.phone2 ?? "",
-          admissionDate: initial.admission_date ?? "",
+          // A blank admission date silently drops this record from Annual Plan / Dashboard
+          // fiscal-year totals (they filter by this date), so an older record saved without
+          // one gets today's date pre-filled here — a one-click Save backfills it correctly,
+          // or the counselor can pick the real date before saving.
+          admissionDate: initial.admission_date ?? todayISO(),
           batchStart: initial.batch_commencement_date ?? ""
         }
       : emptyStudent
@@ -129,6 +137,12 @@ export default function CalculatorForm({
   async function handleSave() {
     if (!batch || !student.name.trim()) {
       setError("Enter the student's name before saving.");
+      return;
+    }
+    if (!student.admissionDate) {
+      // Required: Annual Plan and Dashboard totals for a fiscal year are filtered by this
+      // date, so a blank one silently excludes the admission from every "actuals" figure.
+      setError("Set the admission date before saving.");
       return;
     }
     setSaving(true);
@@ -235,7 +249,13 @@ export default function CalculatorForm({
             </div>
             <div className="field">
               <label>Date of admission</label>
-              <input type="date" value={student.admissionDate} onChange={(e) => setStudent({ ...student, admissionDate: e.target.value })} />
+              <input
+                type="date"
+                required
+                value={student.admissionDate}
+                onChange={(e) => setStudent({ ...student, admissionDate: e.target.value })}
+              />
+              <div className="comp-hint">Drives every fiscal-year total on the Dashboard and Annual Plan pages — required.</div>
             </div>
             <div className="field">
               <label>Batch commencement</label>
