@@ -31,6 +31,7 @@ type CounselorStat = {
   payable: number;
   collected: number;
   outstanding: number;
+  scholarshipGiven: number;
   lastUpdate: string | null;
   students: Row[];
 };
@@ -85,6 +86,7 @@ export default async function TeamPage() {
       payable: 0,
       collected: 0,
       outstanding: 0,
+      scholarshipGiven: 0,
       lastUpdate: null,
       students: []
     });
@@ -103,19 +105,21 @@ export default async function TeamPage() {
     s.payable += Number(r.actual_payable || 0);
     s.collected += Number(r.total_paid || 0);
     s.outstanding += Math.max(0, Number(r.outstanding || 0));
+    s.scholarshipGiven += Number(r.scholarship_amount || 0);
     s.lastUpdate = latest(s.lastUpdate, r.updated_at, r.created_at, r.last_payment_on);
     s.students.push(r);
   }
 
-  const counselorRows = [...stats.values()].sort((a, b) => b.collected - a.collected);
+  const counselorRows = [...stats.values()].sort((a, b) => (isOwner ? b.collected - a.collected : b.count - a.count));
   const totals = counselorRows.reduce(
     (acc, c) => {
       acc.count += c.count;
       acc.collected += c.collected;
       acc.outstanding += c.outstanding;
+      acc.scholarshipGiven += c.scholarshipGiven;
       return acc;
     },
-    { count: 0, collected: 0, outstanding: 0 }
+    { count: 0, collected: 0, outstanding: 0, scholarshipGiven: 0 }
   );
   const assignablePeople = people.map((p) => ({ id: p.id, name: p.full_name || p.email }));
 
@@ -133,14 +137,23 @@ export default async function TeamPage() {
           <div className="kpi-label">Team admissions</div>
           <div className="kpi-val">{totals.count}</div>
         </div>
-        <div className="kpi">
-          <div className="kpi-label">Collected</div>
-          <div className="kpi-val">{formatINR(totals.collected)}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">Outstanding</div>
-          <div className="kpi-val">{formatINR(totals.outstanding)}</div>
-        </div>
+        {isOwner ? (
+          <>
+            <div className="kpi">
+              <div className="kpi-label">Collected</div>
+              <div className="kpi-val">{formatINR(totals.collected)}</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-label">Outstanding</div>
+              <div className="kpi-val">{formatINR(totals.outstanding)}</div>
+            </div>
+          </>
+        ) : (
+          <div className="kpi">
+            <div className="kpi-label">Scholarship given</div>
+            <div className="kpi-val">{formatINR(totals.scholarshipGiven)}</div>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -156,8 +169,14 @@ export default async function TeamPage() {
                 <th>Name</th>
                 <th>Role</th>
                 <th style={{ textAlign: "right" }}>Admissions</th>
-                <th style={{ textAlign: "right" }}>Collected</th>
-                <th style={{ textAlign: "right" }}>Outstanding</th>
+                {isOwner ? (
+                  <>
+                    <th style={{ textAlign: "right" }}>Collected</th>
+                    <th style={{ textAlign: "right" }}>Outstanding</th>
+                  </>
+                ) : (
+                  <th style={{ textAlign: "right" }}>Scholarship given</th>
+                )}
                 <th>Last update</th>
               </tr>
             </thead>
@@ -170,8 +189,14 @@ export default async function TeamPage() {
                   </td>
                   <td style={{ textTransform: "capitalize" }}>{c.role}</td>
                   <td className="amt">{c.count}</td>
-                  <td className="amt">{formatINR(c.collected)}</td>
-                  <td className="amt">{formatINR(c.outstanding)}</td>
+                  {isOwner ? (
+                    <>
+                      <td className="amt">{formatINR(c.collected)}</td>
+                      <td className="amt">{formatINR(c.outstanding)}</td>
+                    </>
+                  ) : (
+                    <td className="amt">{formatINR(c.scholarshipGiven)}</td>
+                  )}
                   <td className="comp-hint">{fmtWhen(c.lastUpdate)}</td>
                 </tr>
               ))}
@@ -188,7 +213,7 @@ export default async function TeamPage() {
           <h2 className="card-title">Students enrolled by counselor</h2>
         </div>
         <p className="comp-hint" style={{ marginBottom: 14 }}>
-          Scholarship and additional discount only &mdash; fee totals and collections stay on the summary above.
+          Scholarship and additional discount only &mdash; no fee totals or collection amounts shown here.
         </p>
         {counselorRows.length === 0 ? (
           <p className="comp-hint">No counselors on your roster yet.</p>
