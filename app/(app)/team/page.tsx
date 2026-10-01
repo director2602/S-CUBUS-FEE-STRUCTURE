@@ -1,8 +1,18 @@
 import Link from "next/link";
 import { supabaseServer } from "@/lib/supabase/server";
 import { formatINR } from "@/lib/fee-calc";
+import CounselorStudentsList from "@/components/CounselorStudentsList";
+import AssignCounselorControl from "@/components/AssignCounselorControl";
 
 type Row = {
+  id: string;
+  scid: string | null;
+  student_name: string;
+  admission_date: string | null;
+  batch_label: string;
+  eff_scholarship_pct: number;
+  scholarship_amount: number;
+  additional_discount: number;
   counselor_id: string;
   actual_payable: number;
   total_paid: number;
@@ -22,6 +32,7 @@ type CounselorStat = {
   collected: number;
   outstanding: number;
   lastUpdate: string | null;
+  students: Row[];
 };
 
 function fmtWhen(d: string | null) {
@@ -45,13 +56,21 @@ function latest(...dates: (string | null)[]) {
 export default async function TeamPage() {
   const supabase = supabaseServer();
 
-  const [{ data: rows }, { data: profiles }] = await Promise.all([
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  const [{ data: viewerProfile }, { data: rows }, { data: profiles }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user!.id).single(),
     supabase
       .from("admissions_computed")
-      .select("counselor_id, actual_payable, total_paid, outstanding, created_at, updated_at, last_payment_on"),
+      .select(
+        "id, scid, student_name, admission_date, batch_label, eff_scholarship_pct, scholarship_amount, additional_discount, counselor_id, actual_payable, total_paid, outstanding, created_at, updated_at, last_payment_on"
+      ),
     supabase.from("profiles").select("id, full_name, email, role").in("role", ["counselor", "manager"])
   ]);
 
+  const isOwner = viewerProfile?.role === "owner";
   const data = (rows as Row[]) || [];
   const people = (profiles as { id: string; full_name: string | null; email: string; role: string }[]) || [];
 
@@ -66,17 +85,26 @@ export default async function TeamPage() {
       payable: 0,
       collected: 0,
       outstanding: 0,
-      lastUpdate: null
+      lastUpdate: null,
+      students: []
     });
   }
+
+  const unassigned: Row[] = [];
   for (const r of data) {
-    const s = stats.get(r.counselor_id);
-    if (!s) continue; // record belongs to someone no longer on the roster (or an owner)
+    const s = r.counselor_id ? stats.get(r.counselor_id) : undefined;
+    if (!s) {
+      // Either no counselor at all, or one no longer on the roster (deleted account, say).
+      // Only the owner can actually see these rows (RLS), but guard anyway.
+      unassigned.push(r);
+      continue;
+    }
     s.count += 1;
     s.payable += Number(r.actual_payable || 0);
     s.collected += Number(r.total_paid || 0);
     s.outstanding += Math.max(0, Number(r.outstanding || 0));
     s.lastUpdate = latest(s.lastUpdate, r.updated_at, r.created_at, r.last_payment_on);
+    s.students.push(r);
   }
 
   const counselorRows = [...stats.values()].sort((a, b) => b.collected - a.collected);
@@ -89,11 +117,12 @@ export default async function TeamPage() {
     },
     { count: 0, collected: 0, outstanding: 0 }
   );
+  const assignablePeople = people.map((p) => ({ id: p.id, name: p.full_name || p.email }));
 
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-        <p className="lede">Track every counselor&rsquo;s admissions, collections and last activity &mdash; and log your own.</p>
+        <p className="lede">Track every counselor&rsquo;s admissions and last activity &mdash; and log your own.</p>
         <Link className="btn secondary small" href="/calculator">
           + New admission
         </Link>
@@ -119,7 +148,7 @@ export default async function TeamPage() {
           <h2 className="card-title">Counselor performance</h2>
         </div>
         {counselorRows.length === 0 ? (
-          <p className="comp-hint">No counselors on the roster yet.</p>
+          <p className="comp-hint">No counselors on your roster yet.</p>
         ) : (
           <table className="data">
             <thead>
@@ -150,6 +179,70 @@ export default async function TeamPage() {
           </table>
         )}
       </div>
+
+      <div style={{ height: 24 }} />
+
+      <div className="card">
+        <div className="card-head">
+          <span className="kicker">Per student</span>
+          <h2 className="card-title">Students enrolled by counselor</h2>
+        </div>
+        <p className="comp-hint" style={{ marginBottom: 14 }}>
+          Scholarship and additional discount only &mdash; fee totals and collections stay on the summary above.
+        </p>
+        {counselorRows.length === 0 ? (
+          <p className="comp-hint">No counselors on your roster yet.</p>
+        ) : (
+          <div className="stack" style={{ gap: 18 }}>
+            {counselorRows.map((c) => (
+              <div key={c.id}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>{c.name}</div>
+                <CounselorStudentsList students={c.students} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {isOwner && (
+        <>
+          <div style={{ height: 24 }} />
+          <div className="card">
+            <div className="card-head">
+              <h2 className="card-title">Unassigned students</h2>
+            </div>
+            {unassigned.length === 0 ? (
+              <p className="comp-hint">Every student is assigned to a counselor.</p>
+            ) : (
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Batch</th>
+                    <th>Admitted</th>
+                    <th>Assign to</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unassigned.map((r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{r.student_name}</div>
+                        <div className="comp-hint">{r.scid || "—"}</div>
+                      </td>
+                      <td>{r.batch_label}</td>
+                      <td>{r.admission_date || "—"}</td>
+                      <td>
+                        <AssignCounselorControl admissionId={r.id} people={assignablePeople} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
     </>
   );
 }

@@ -126,3 +126,24 @@ export async function setCounselorRole(id: string, role: "counselor" | "manager"
   revalidatePath("/team");
   return { success: true };
 }
+
+// Allots a counselor to a manager (or clears the assignment with managerId = null). Only the
+// owner can call this — it decides which manager's "Team Performance" view a counselor shows
+// up in.
+export async function assignManager(counselorId: string, managerId: string | null) {
+  const supabase = supabaseServer();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (profile?.role !== "owner") return { error: "Only the owner can allot counselors to managers." };
+
+  const { error } = await supabase.from("profiles").update({ manager_id: managerId }).eq("id", counselorId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/counselors");
+  revalidatePath("/team");
+  return { success: true };
+}
