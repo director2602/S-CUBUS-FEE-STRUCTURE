@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export default function NavLinks({ isOwner }: { isOwner: boolean }) {
+export default function NavLinks({ role }: { role: string }) {
   const pathname = usePathname();
+  const isOwner = role === "owner";
+  const isManager = role === "manager";
   const links = [
     { href: "/calculator", label: "Calculator" },
+    ...(isOwner || isManager ? [{ href: "/team", label: "Team Performance" }] : []),
     ...(isOwner
       ? [
           { href: "/dashboard", label: "Dashboard" },

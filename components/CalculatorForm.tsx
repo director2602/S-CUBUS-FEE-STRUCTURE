@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { BATCH_GROUP_ORDER, computeFees, formatINR, type Batch } from "@/lib/fee-calc";
 import { cleanCustomFieldValues, type CustomFieldDef } from "@/lib/custom-fields";
 import CustomFieldInputs from "@/components/CustomFieldInputs";
+import { currentFiscalYear } from "@/lib/aop-calc";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 type Student = {
   scid: string;
@@ -45,6 +47,30 @@ const emptyStudent: Student = {
 };
 
 const emptyNotes: Notes = { modeReg: "", mode1: "", mode2: "", mode3: "", pdc1: "", pdc2: "", remarks: "" };
+
+// SCID format: SC + {last 2 digits of the fiscal year it ends in} + {7-digit sequence} — e.g.
+// SC270000001 for the first admission of FY 2026-27. The year part rolls over automatically
+// every April along with the fiscal year, and the sequence is per-year (starts over at 1
+// each new fiscal year) so numbers stay short and readable year over year.
+function scidYearPrefix() {
+  return currentFiscalYear().split("-")[1];
+}
+
+function nextScidFromExisting(existingScids: (string | null)[], yearPrefix: string) {
+  const pattern = new RegExp(`^SC${yearPrefix}(\\d{7})$`, "i");
+  let maxN = 0;
+  for (const s of existingScids) {
+    const m = s ? pattern.exec(s) : null;
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  return `SC${yearPrefix}${String(maxN + 1).padStart(7, "0")}`;
+}
+
+async function fetchNextScid(supabase: SupabaseClient) {
+  const yearPrefix = scidYearPrefix();
+  const { data } = await supabase.from("admissions").select("scid").ilike("scid", `SC${yearPrefix}%`);
+  return nextScidFromExisting(((data as any[]) || []).map((r) => r.scid), yearPrefix);
+}
 
 export default function CalculatorForm({
   batches,
@@ -113,6 +139,32 @@ export default function CalculatorForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [scidLoading, setScidLoading] = useState(mode === "create");
+
+  // New admissions get the next SCID in sequence automatically — no typing, no risk of a
+  // duplicate or a typo'd number. Editing an existing admission leaves its SCID as saved.
+  useEffect(() => {
+    if (mode !== "create") return;
+    let cancelled = false;
+    fetchNextScid(supabase)
+      .then((scid) => {
+        if (!cancelled) setStudent((prev) => (prev.scid ? prev : { ...prev, scid }));
+      })
+      .finally(() => {
+        if (!cancelled) setScidLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  async function refreshScid() {
+    setScidLoading(true);
+    const scid = await fetchNextScid(supabase);
+    setStudent((prev) => ({ ...prev, scid }));
+    setScidLoading(false);
+  }
 
   const batch = useMemo(() => batches.find((b) => b.key === batchKey) ?? batches[0], [batches, batchKey]);
   const groups = useMemo(
@@ -197,6 +249,14 @@ export default function CalculatorForm({
 
     setSaving(false);
     if (error) {
+      // Unique-violation on SCID: another counselor's save landed first and took this exact
+      // number in the moment between us fetching it and saving. Get a fresh one automatically
+      // rather than leaving the counselor to figure out what went wrong.
+      if ((error as any).code === "23505" && mode === "create") {
+        setError("That SCID was just taken by another admission saved a moment ago — fetched the next one, please save again.");
+        refreshScid();
+        return;
+      }
       setError(error.message);
       return;
     }
@@ -217,6 +277,7 @@ export default function CalculatorForm({
     setTuitionOverride(null);
     setKitOverride(null);
     setCustomValues({});
+    refreshScid();
     onSaved?.();
   }
 
@@ -233,7 +294,19 @@ export default function CalculatorForm({
           <div className="field-grid">
             <div className="field">
               <label>SCID</label>
-              <input value={student.scid} onChange={(e) => setStudent({ ...student, scid: e.target.value })} placeholder="27SC00000001" />
+              {mode === "create" ? (
+                <>
+                  <input value={scidLoading ? "Assigning…" : student.scid} readOnly style={{ background: "var(--bg)", color: "var(--muted)" }} />
+                  <div className="comp-hint">
+                    Auto-assigned, next in sequence for FY {currentFiscalYear()}.{" "}
+                    <button type="button" className="reset-btn" style={{ display: "inline", padding: 0 }} onClick={refreshScid} disabled={scidLoading}>
+                      Refresh
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <input value={student.scid} onChange={(e) => setStudent({ ...student, scid: e.target.value })} placeholder="SC270000001" />
+              )}
             </div>
             <div className="field">
               <label>Student name</label>

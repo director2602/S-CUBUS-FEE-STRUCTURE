@@ -13,7 +13,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const { data: profile } = await supabase.from("profiles").select("full_name, role, email").eq("id", user.id).single();
 
-  const isOwner = profile?.role === "owner";
+  const role = profile?.role || "counselor";
+  const roleLabel = role === "owner" ? "Owner" : role === "manager" ? "Manager" : "Counselor";
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
@@ -24,9 +25,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <div className="brand-sub">Fee Portal</div>
           </div>
           <div className="nav">
-            <NavLinks isOwner={isOwner} />
+            <NavLinks role={role} />
             <span style={{ color: "#c9bfce", fontSize: 12.5, padding: "0 6px" }}>
-              {profile?.full_name || profile?.email} &middot; {isOwner ? "Owner" : "Counselor"}
+              {profile?.full_name || profile?.email} &middot; {roleLabel}
             </span>
             <SignOutButton />
           </div>

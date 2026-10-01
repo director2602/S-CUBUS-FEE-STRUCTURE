@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 const OWNER_ONLY_PREFIXES = ["/dashboard", "/counselors", "/fee-structure", "/annual-plan", "/custom-fields"];
+const MANAGER_OR_OWNER_PREFIXES = ["/team"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
@@ -40,6 +41,15 @@ export async function middleware(request: NextRequest) {
   if (user && OWNER_ONLY_PREFIXES.some((p) => path.startsWith(p))) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (profile?.role !== "owner") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/calculator";
+      return NextResponse.redirect(url);
+    }
+  }
+
+  if (user && MANAGER_OR_OWNER_PREFIXES.some((p) => path.startsWith(p))) {
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (profile?.role !== "owner" && profile?.role !== "manager") {
       const url = request.nextUrl.clone();
       url.pathname = "/calculator";
       return NextResponse.redirect(url);
