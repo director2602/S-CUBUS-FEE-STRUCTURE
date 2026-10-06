@@ -1,10 +1,11 @@
 import { supabaseServer } from "@/lib/supabase/server";
-import { formatINR } from "@/lib/fee-calc";
+import { formatINR, ARPU_TARGET, isOfflineArpuBatch } from "@/lib/fee-calc";
 import DashboardLedger from "@/components/DashboardLedger";
 
 type Row = {
   id: string;
   counselor_id: string;
+  batch_key: string;
   batch_label: string;
   batch_group: string;
   gross_fee: number;
@@ -26,9 +27,10 @@ function Bar({ value, max }: { value: number; max: number }) {
 export default async function DashboardPage() {
   const supabase = supabaseServer();
 
-  const [{ data: rows }, { data: profiles }] = await Promise.all([
+  const [{ data: rows }, { data: profiles }, { data: batchList }] = await Promise.all([
     supabase.from("admissions_computed").select("*"),
-    supabase.from("profiles").select("id, full_name, email").eq("role", "counselor")
+    supabase.from("profiles").select("id, full_name, email").eq("role", "counselor"),
+    supabase.from("batches").select("key, label, group_name, sort_order").eq("active", true).order("sort_order")
   ]);
 
   const data = (rows as any[]) || [];
@@ -68,6 +70,34 @@ export default async function DashboardPage() {
   }
   const counselorRows = [...byCounselor.values()].sort((a, b) => b.collected - a.collected);
   const maxCounselorCollected = Math.max(1, ...counselorRows.map((c) => c.collected));
+
+  // Class-wise ARPU vs target — billed fee (actual_payable) per student, offline classes only.
+  const byBatchKey = new Map<string, { count: number; payable: number }>();
+  for (const r of data) {
+    if (!r.batch_key) continue;
+    const cur = byBatchKey.get(r.batch_key) || { count: 0, payable: 0 };
+    cur.count += 1;
+    cur.payable += Number(r.actual_payable || 0);
+    byBatchKey.set(r.batch_key, cur);
+  }
+  const offlineBatchDefs = ((batchList as any[]) || []).filter((b) => isOfflineArpuBatch(b.key, b.group_name));
+  const arpuRows = offlineBatchDefs.map((b) => {
+    const agg = byBatchKey.get(b.key) || { count: 0, payable: 0 };
+    const arpu = agg.count > 0 ? agg.payable / agg.count : 0;
+    return {
+      key: b.key,
+      label: b.label,
+      count: agg.count,
+      payable: agg.payable,
+      arpu,
+      met: agg.count > 0 && arpu >= ARPU_TARGET
+    };
+  });
+  const arpuRowsWithAdmissions = arpuRows.filter((r) => r.count > 0);
+  const offlineAdmissions = arpuRowsWithAdmissions.reduce((s, r) => s + r.count, 0);
+  const offlinePayable = arpuRowsWithAdmissions.reduce((s, r) => s + r.payable, 0);
+  const blendedOfflineArpu = offlineAdmissions > 0 ? offlinePayable / offlineAdmissions : 0;
+  const classesMeetingTarget = arpuRowsWithAdmissions.filter((r) => r.met).length;
 
   return (
     <>
@@ -111,6 +141,67 @@ export default async function DashboardPage() {
           </div>
           <div className="kpi-val">{unpaid}</div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 32 }}>
+        <div className="card-head">
+          <span className="kicker">Actuals</span>
+          <h2 className="card-title">Class-wise ARPU vs Target (Offline)</h2>
+        </div>
+        <p className="comp-hint" style={{ marginBottom: 14 }}>
+          Billed fee per student, target {formatINR(ARPU_TARGET)} &mdash; excludes Online-group batches, Special
+          Student, SATHII and Dubai Online.
+        </p>
+        <div className="kpi-grid" style={{ marginBottom: 18, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+          <div className="kpi">
+            <div className="kpi-label">Offline admissions</div>
+            <div className="kpi-val">{offlineAdmissions}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">Blended offline ARPU</div>
+            <div className="kpi-val" style={{ color: blendedOfflineArpu >= ARPU_TARGET ? "var(--good-fg)" : "var(--bad-fg)" }}>
+              {formatINR(blendedOfflineArpu)}
+            </div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">Classes meeting target</div>
+            <div className="kpi-val">
+              {classesMeetingTarget} / {arpuRowsWithAdmissions.length || 0}
+            </div>
+          </div>
+        </div>
+        {arpuRows.length === 0 ? (
+          <p className="comp-hint">No offline classes configured yet.</p>
+        ) : (
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Class</th>
+                <th style={{ textAlign: "right" }}>Admissions</th>
+                <th style={{ textAlign: "right" }}>ARPU (billed)</th>
+                <th style={{ textAlign: "right" }}>Target</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {arpuRows.map((r) => (
+                <tr key={r.key}>
+                  <td>{r.label}</td>
+                  <td className="amt">{r.count}</td>
+                  <td className="amt">{r.count > 0 ? formatINR(r.arpu) : "—"}</td>
+                  <td className="amt">{formatINR(ARPU_TARGET)}</td>
+                  <td>
+                    {r.count === 0 ? (
+                      <span className="comp-hint">No admissions yet</span>
+                    ) : (
+                      <span className={`badge ${r.met ? "good" : "bad"}`}>{r.met ? "Target met" : "Below target"}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="grid-2">

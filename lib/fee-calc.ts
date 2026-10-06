@@ -77,6 +77,16 @@ export function computeFees(inputs: FeeInputs) {
 
 export const BATCH_GROUP_ORDER = ["Foundation", "JEE", "NEET", "Online", "SIP", "Other"];
 
+// Class-wise ARPU target (billed fee per student, after scholarship/discount) — applies to
+// every regular offline teaching class. Online-delivered batches and the handful of batches
+// that aren't a regular class at all (Special Student, the SATHII exam fee, Dubai Online)
+// are excluded, since none of them are meant to be priced against this target.
+export const ARPU_TARGET = 110000;
+export const ARPU_EXCLUDED_BATCH_KEYS = ["special", "sathii", "dubai"];
+export function isOfflineArpuBatch(batchKey: string, batchGroup: string) {
+  return batchGroup !== "Online" && !ARPU_EXCLUDED_BATCH_KEYS.includes(batchKey);
+}
+
 export const INSTALLMENT_LABELS = ["Registration", "Installment 1", "Installment 2", "Installment 3", "Other"] as const;
 
 export type Payment = {
