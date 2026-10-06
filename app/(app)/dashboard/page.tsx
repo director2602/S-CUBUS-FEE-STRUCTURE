@@ -1,5 +1,14 @@
 import { supabaseServer } from "@/lib/supabase/server";
-import { formatINR, ARPU_TARGET, isOfflineArpuBatch } from "@/lib/fee-calc";
+import {
+  formatINR,
+  ARPU_TARGET,
+  isOfflineArpuBatch,
+  MIX_TARGET_GROUPS,
+  MIN_SCHOLARSHIP_FLOOR_PCT,
+  floorFee,
+  splitEvenly,
+  type Batch
+} from "@/lib/fee-calc";
 import DashboardLedger from "@/components/DashboardLedger";
 
 type Row = {
@@ -30,7 +39,11 @@ export default async function DashboardPage() {
   const [{ data: rows }, { data: profiles }, { data: batchList }] = await Promise.all([
     supabase.from("admissions_computed").select("*"),
     supabase.from("profiles").select("id, full_name, email").eq("role", "counselor"),
-    supabase.from("batches").select("key, label, group_name, sort_order").eq("active", true).order("sort_order")
+    supabase
+      .from("batches")
+      .select("key, label, group_name, sort_order, reg_fee, tuition_fee, kit_fee, default_scholarship_pct, active")
+      .eq("active", true)
+      .order("sort_order")
   ]);
 
   const data = (rows as any[]) || [];
@@ -98,6 +111,40 @@ export default async function DashboardPage() {
   const offlinePayable = arpuRowsWithAdmissions.reduce((s, r) => s + r.payable, 0);
   const blendedOfflineArpu = offlineAdmissions > 0 ? offlinePayable / offlineAdmissions : 0;
   const classesMeetingTarget = arpuRowsWithAdmissions.filter((r) => r.met).length;
+
+  // Recommended enrollment mix to blend to the ARPU target overall, since Foundation
+  // 8/9/10 can't get there on a per-class basis — see lib/fee-calc.ts for the method.
+  const mixBatches = ((batchList as any[]) || []).filter((b) => MIX_TARGET_GROUPS.includes(b.group_name)) as Batch[];
+  const foundationMixBatches = mixBatches.filter((b) => b.group_name === "Foundation");
+  const jeeNeetMixBatches = mixBatches.filter((b) => b.group_name === "JEE" || b.group_name === "NEET");
+  const floorFeeByKey = new Map<string, number>(mixBatches.map((b) => [b.key, floorFee(b)]));
+  const avg = (keys: string[]) => (keys.length ? keys.reduce((s, k) => s + (floorFeeByKey.get(k) || 0), 0) / keys.length : 0);
+  const avgFoundationFloorFee = avg(foundationMixBatches.map((b) => b.key));
+  const avgJeeNeetFloorFee = avg(jeeNeetMixBatches.map((b) => b.key));
+  const mixDenom = avgJeeNeetFloorFee - ARPU_TARGET;
+  const requiredJeeNeetToFoundationRatio = mixDenom > 0 ? (ARPU_TARGET - avgFoundationFloorFee) / mixDenom : null;
+  const foundationShare = requiredJeeNeetToFoundationRatio != null ? 1 / (1 + requiredJeeNeetToFoundationRatio) : null;
+
+  const MIX_TOTAL_TARGET = 600; // owner's stated minimum total enrollment target
+  const targetFoundationTotal = foundationShare != null ? Math.round(MIX_TOTAL_TARGET * foundationShare) : 0;
+  const targetJeeNeetTotal = MIX_TOTAL_TARGET - targetFoundationTotal;
+  const foundationTargets = splitEvenly(targetFoundationTotal, foundationMixBatches.length);
+  const jeeNeetTargets = splitEvenly(targetJeeNeetTotal, jeeNeetMixBatches.length);
+
+  const mixRows = [
+    ...foundationMixBatches.map((b, i) => ({ ...b, targetStudents: foundationTargets[i] || 0 })),
+    ...jeeNeetMixBatches.map((b, i) => ({ ...b, targetStudents: jeeNeetTargets[i] || 0 }))
+  ].map((b) => ({
+    key: b.key,
+    label: b.label,
+    group: b.group_name,
+    floorFee: floorFeeByKey.get(b.key) || 0,
+    currentDefaultPct: b.default_scholarship_pct,
+    targetStudents: b.targetStudents
+  }));
+  const mixAchievedRevenue = mixRows.reduce((s, r) => s + r.floorFee * r.targetStudents, 0);
+  const mixAchievedStudents = mixRows.reduce((s, r) => s + r.targetStudents, 0);
+  const mixAchievedArpu = mixAchievedStudents > 0 ? mixAchievedRevenue / mixAchievedStudents : 0;
 
   return (
     <>
@@ -202,6 +249,69 @@ export default async function DashboardPage() {
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 32 }}>
+        <div className="card-head">
+          <span className="kicker">Planning</span>
+          <h2 className="card-title">
+            {MIX_TOTAL_TARGET}+ Student Target &mdash; {formatINR(ARPU_TARGET)} Blended ARPU
+          </h2>
+        </div>
+        <p className="comp-hint" style={{ marginBottom: 14 }}>
+          Foundation 8/9/10 can&rsquo;t reach {formatINR(ARPU_TARGET)} on their own &mdash; even at a scholarship
+          floor of only {MIN_SCHOLARSHIP_FLOOR_PCT}%, Foundation 10 tops out at {formatINR(floorFeeByKey.get("found10") || 0)}
+          per student. The only way to land a blended {formatINR(ARPU_TARGET)} across your core offline classes
+          (Foundation + JEE + NEET &mdash; SIP runs an 80% scholarship by design and Online/Special/SATHII/Dubai
+          aren&rsquo;t revenue-target classes, so none of those count here) is to weight enrollment toward JEE/NEET.
+          The table below is a {MIX_TOTAL_TARGET}-student plan &mdash; your stated minimum total &mdash; split by class
+          to hit the target. It assumes every class holds scholarship at a floor of {MIN_SCHOLARSHIP_FLOOR_PCT}%
+          on every enrollment (Foundation currently defaults to {foundationMixBatches[0]?.default_scholarship_pct ?? 50}%
+          &mdash; you&rsquo;d need to tighten that to {MIN_SCHOLARSHIP_FLOOR_PCT}% for these numbers to hold) and 0% GST,
+          matching how admissions are billed today.
+        </p>
+        <div className="kpi-grid" style={{ marginBottom: 18, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+          <div className="kpi">
+            <div className="kpi-label">Required mix</div>
+            <div className="kpi-val">
+              {foundationShare != null ? `${Math.round(foundationShare * 100)}% Foundation / ${Math.round((1 - foundationShare) * 100)}% JEE+NEET` : "—"}
+            </div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">Target total enrollment</div>
+            <div className="kpi-val">{MIX_TOTAL_TARGET}+</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">Blended ARPU at this mix</div>
+            <div className="kpi-val" style={{ color: mixAchievedArpu >= ARPU_TARGET ? "var(--good-fg)" : "var(--bad-fg)" }}>
+              {formatINR(mixAchievedArpu)}
+            </div>
+          </div>
+        </div>
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Class</th>
+              <th style={{ textAlign: "right" }}>Fee/student @ {MIN_SCHOLARSHIP_FLOOR_PCT}% scholarship</th>
+              <th style={{ textAlign: "right" }}>Current default scholarship</th>
+              <th style={{ textAlign: "right" }}>Target students (of {MIX_TOTAL_TARGET})</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mixRows.map((r) => (
+              <tr key={r.key}>
+                <td>{r.label}</td>
+                <td className="amt">{formatINR(r.floorFee)}</td>
+                <td className="amt">{r.currentDefaultPct}%</td>
+                <td className="amt">{r.targetStudents}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="comp-hint" style={{ marginTop: 10 }}>
+          Growing past {MIX_TOTAL_TARGET}? Keep roughly the same Foundation : JEE+NEET split shown above, split
+          evenly within each tier &mdash; the ratio holds at any total size.
+        </p>
       </div>
 
       <div className="grid-2">

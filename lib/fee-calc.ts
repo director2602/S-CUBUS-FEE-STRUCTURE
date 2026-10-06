@@ -87,6 +87,45 @@ export function isOfflineArpuBatch(batchKey: string, batchGroup: string) {
   return batchGroup !== "Online" && !ARPU_EXCLUDED_BATCH_KEYS.includes(batchKey);
 }
 
+// Recommended enrollment mix to hit the ARPU target "overall" rather than per class.
+// Foundation (8/9/10) is priced structurally below the target no matter how much
+// scholarship is trimmed, so the only lever that moves a BLENDED average is the mix
+// of students across classes, not headcount in isolation. This models every core
+// class (Foundation + JEE + NEET — SIP runs an 80% scholarship by design and isn't a
+// revenue-target class; Online/Special/SATHII/Dubai are excluded for the same reason
+// as the ARPU card
+// above) at a scholarship floor of 40%, then solves for the Foundation : JEE+NEET
+// headcount ratio that blends to the target.
+export const MIX_TARGET_GROUPS = ["Foundation", "JEE", "NEET"];
+export const MIN_SCHOLARSHIP_FLOOR_PCT = 40;
+
+export function floorFee(batch: Batch) {
+  return computeFees({
+    batch,
+    regOverride: null,
+    tuitionOverride: null,
+    kitOverride: null,
+    scholarshipPct: MIN_SCHOLARSHIP_FLOOR_PCT,
+    gstRate: 0,
+    additionalDiscount: 0,
+    actualFeesPaid: 0
+  }).actualPayable;
+}
+
+// Splits `total` whole students across `n` classes as evenly as possible.
+export function splitEvenly(total: number, n: number) {
+  if (n <= 0) return [];
+  const base = Math.floor(total / n);
+  let rem = total - base * n;
+  return Array.from({ length: n }, () => {
+    if (rem > 0) {
+      rem--;
+      return base + 1;
+    }
+    return base;
+  });
+}
+
 export const INSTALLMENT_LABELS = ["Registration", "Installment 1", "Installment 2", "Installment 3", "Other"] as const;
 
 export type Payment = {
