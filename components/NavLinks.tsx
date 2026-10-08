@@ -15,6 +15,7 @@ export default function NavLinks({ role }: { role: string }) {
           { href: "/dashboard", label: "Dashboard" },
           { href: "/annual-plan", label: "Annual Plan" },
           { href: "/aop", label: "AOP" },
+          { href: "/org", label: "Team & Hierarchy" },
           { href: "/fee-structure", label: "Fee Structure" },
           { href: "/counselors", label: "Counselors" },
           { href: "/custom-fields", label: "Manage Fields" }
