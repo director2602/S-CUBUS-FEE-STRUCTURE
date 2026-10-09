@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { BATCH_GROUP_ORDER, computeFees, formatINR, type Batch } from "@/lib/fee-calc";
 import { cleanCustomFieldValues, type CustomFieldDef } from "@/lib/custom-fields";
@@ -144,6 +145,11 @@ export default function CalculatorForm({
   const [error, setError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [scidLoading, setScidLoading] = useState(mode === "create");
+  // Set right after a successful create-mode save so the confirmation area can offer a
+  // "Print invoice" link straight away, without the counselor having to navigate away from
+  // this form to find it.
+  const [lastSaved, setLastSaved] = useState<{ admissionId: string; hasPayment: boolean } | null>(null);
+  const [paymentWarning, setPaymentWarning] = useState<string | null>(null);
 
   // New admissions get the next SCID in sequence automatically — no typing, no risk of a
   // duplicate or a typo'd number. Editing an existing admission leaves its SCID as saved.
@@ -214,6 +220,10 @@ export default function CalculatorForm({
     setSaving(true);
     setError(null);
     setSavedMsg(null);
+    setPaymentWarning(null);
+    setLastSaved(null);
+
+    const isCreate = mode !== "edit";
 
     const payload = {
       scid: student.scid || null,
@@ -235,7 +245,11 @@ export default function CalculatorForm({
       scholarship_pct: scholarshipPct ?? batch.default_scholarship_pct,
       gst_rate: gstRate,
       additional_discount: additionalDiscount,
-      actual_fees_paid: actualFeesPaid,
+      // On a brand-new admission, an amount collected right now is logged as the student's
+      // first payment instead (just below) so it gets its own invoice — admissions_computed's
+      // total_paid is actual_fees_paid + SUM(payments.amount), so this must stay 0 here or the
+      // amount would be counted twice. Editing an existing admission leaves this field alone.
+      actual_fees_paid: isCreate ? 0 : actualFeesPaid,
       mode_reg: notes.modeReg || null,
       mode1: notes.mode1 || null,
       mode2: notes.mode2 || null,
@@ -246,17 +260,30 @@ export default function CalculatorForm({
       custom_fields: cleanCustomFieldValues(customValues)
     };
 
-    const { error } =
-      mode === "edit" && admissionId
-        ? await supabase.from("admissions").update(payload).eq("id", admissionId)
-        : await supabase.from("admissions").insert({ ...payload, counselor_id: counselorId });
+    if (!isCreate && admissionId) {
+      const { error } = await supabase.from("admissions").update(payload).eq("id", admissionId);
+      setSaving(false);
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      setSavedMsg("Changes saved.");
+      onSaved?.();
+      return;
+    }
 
-    setSaving(false);
+    const { data: inserted, error } = await supabase
+      .from("admissions")
+      .insert({ ...payload, counselor_id: counselorId })
+      .select("id")
+      .single();
+
     if (error) {
+      setSaving(false);
       // Unique-violation on SCID: another counselor's save landed first and took this exact
       // number in the moment between us fetching it and saving. Get a fresh one automatically
       // rather than leaving the counselor to figure out what went wrong.
-      if ((error as any).code === "23505" && mode === "create") {
+      if ((error as any).code === "23505") {
         setError("That SCID was just taken by another admission saved a moment ago — fetched the next one, please save again.");
         refreshScid();
         return;
@@ -265,13 +292,34 @@ export default function CalculatorForm({
       return;
     }
 
-    if (mode === "edit") {
-      setSavedMsg("Changes saved.");
-      onSaved?.();
-      return;
+    const newAdmissionId = (inserted as any).id as string;
+    let paymentCreated = false;
+
+    // Log the amount collected right now as the student's first real payment — invoice
+    // numbers only exist for rows in the payments table, so without this there would be
+    // nothing to print until a later installment is logged from the Payments panel.
+    if (actualFeesPaid > 0) {
+      const { error: payErr } = await supabase.from("payments").insert({
+        admission_id: newAdmissionId,
+        installment_label: "Registration",
+        amount: actualFeesPaid,
+        paid_on: student.admissionDate,
+        mode: notes.modeReg || null,
+        note: null,
+        recorded_by: counselorId
+      });
+      if (payErr) {
+        setPaymentWarning(
+          `Admission saved, but logging the opening payment failed: ${payErr.message}. Log it from this admission's Payments panel so it gets an invoice.`
+        );
+      } else {
+        paymentCreated = true;
+      }
     }
 
+    setSaving(false);
     setSavedMsg(`Saved ${student.name}'s admission.`);
+    setLastSaved({ admissionId: newAdmissionId, hasPayment: paymentCreated });
     setStudent(emptyStudent);
     setNotes(emptyNotes);
     setScholarshipPct(null);
@@ -505,7 +553,7 @@ export default function CalculatorForm({
               <div className="comp-hint">
                 {mode === "edit"
                   ? "This is the opening amount only. Log every installment paid after admission from the Payments panel on this admission's page — it adds on top of this figure."
-                  : "Amount collected right now, if any. Once saved, log each later installment from the admission's Payments panel so the running total stays accurate."}
+                  : "Amount collected right now, if any — saving logs it as the student's first payment automatically, with its own invoice ready to print right away. Log each later installment from the admission's Payments panel."}
               </div>
             </div>
           </div>
@@ -574,7 +622,24 @@ export default function CalculatorForm({
           </table>
 
           {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
-          {savedMsg && <div className="success-text" style={{ marginTop: 12 }}>{savedMsg}</div>}
+          {savedMsg && (
+            <div className="success-text" style={{ marginTop: 12 }}>
+              {savedMsg}
+              {lastSaved && (
+                <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {lastSaved.hasPayment && (
+                    <Link className="btn small" href={`/admissions/${lastSaved.admissionId}/invoice`} target="_blank">
+                      Print invoice
+                    </Link>
+                  )}
+                  <Link className="btn small secondary" href={`/admissions/${lastSaved.admissionId}`} target="_blank">
+                    View admission
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+          {paymentWarning && <div className="error-text" style={{ marginTop: 8 }}>{paymentWarning}</div>}
           <button className="btn" style={{ marginTop: 16, width: "100%" }} onClick={handleSave} disabled={saving}>
             {saving ? "Saving…" : mode === "edit" ? "Save changes" : "Save admission"}
           </button>
