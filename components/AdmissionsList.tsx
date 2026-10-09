@@ -20,7 +20,15 @@ type Row = {
 
 const SELECT_COLS = "id, scid, student_name, batch_label, actual_payable, total_paid, outstanding, billing_status, created_at, pdf_path";
 
-export default function AdmissionsList({ isOwner, reloadToken }: { isOwner: boolean; reloadToken: number }) {
+export default function AdmissionsList({
+  isOwner,
+  allAdmissions,
+  reloadToken
+}: {
+  isOwner: boolean;
+  allAdmissions?: boolean;
+  reloadToken: number;
+}) {
   const supabase = supabaseBrowser();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,7 +97,7 @@ export default function AdmissionsList({ isOwner, reloadToken }: { isOwner: bool
     <div className="card">
       <div className="card-head">
         <span className="kicker">07</span>
-        <h2 className="card-title">{isOwner ? "All Admissions" : "My Admissions"}</h2>
+        <h2 className="card-title">{isOwner || allAdmissions ? "All Admissions" : "My Admissions"}</h2>
       </div>
 
       <div className="field" style={{ marginBottom: 16 }}>
