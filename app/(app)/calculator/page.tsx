@@ -31,6 +31,7 @@ export default async function CalculatorPage() {
       batches={(batches as Batch[]) || []}
       counselorId={user!.id}
       isOwner={profile?.role === "owner"}
+      allAdmissions={profile?.role === "owner" || profile?.role === "manager" || profile?.role === "accounts"}
       fieldDefs={fieldDefs}
     />
   );
