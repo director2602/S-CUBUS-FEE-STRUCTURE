@@ -18,7 +18,7 @@ const COMPANY = {
   name: "S-CUBUS CAREER PRIVATE LIMITED",
   addressLines: ["Delhi", "India"],
   gstin: "GSTIN 07ABSCS4021P1ZQ",
-  phone: "91-9649121033",
+  phone: "91-8796101095",
   email: "scubuscareerpvtltd@gmail.com",
   placeOfSupply: "Delhi (07)"
 };
