@@ -8,19 +8,134 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { formatINR, type Payment } from "@/lib/fee-calc";
 import SignaturePad, { type SignaturePadHandle } from "@/components/SignaturePad";
 import PaymentsPanel from "@/components/PaymentsPanel";
+import { setRefundStatus } from "@/app/actions/admissions";
 import type { CustomFieldDef } from "@/lib/custom-fields";
 
 const PLUM: [number, number, number] = [64, 12, 77];
 const SOFT: [number, number, number] = [107, 101, 88];
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function RefundControl({ admission, canManageRefund }: { admission: any; canManageRefund: boolean }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(todayISO());
+  const [amount, setAmount] = useState(String(admission.total_paid || ""));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirmRefund() {
+    setBusy(true);
+    setError(null);
+    const res = await setRefundStatus(admission.id, true, {
+      refundedAt: date,
+      refundAmount: amount ? parseFloat(amount) : null,
+      refundNote: note || null
+    });
+    setBusy(false);
+    if (res?.error) {
+      setError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  async function undoRefund() {
+    setBusy(true);
+    setError(null);
+    const res = await setRefundStatus(admission.id, false);
+    setBusy(false);
+    if (res?.error) {
+      setError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  if (admission.status === "refunded") {
+    return (
+      <div className="card" style={{ borderColor: "var(--bad-fg)" }}>
+        <div className="card-head">
+          <span className="kicker">Refunded</span>
+          <h2 className="card-title">This admission is marked refunded</h2>
+        </div>
+        <p className="comp-hint">
+          Refunded on {admission.refunded_at || "—"}
+          {admission.refund_amount != null ? `, ${formatINR(admission.refund_amount)}` : ""}
+          {admission.refund_note ? ` — ${admission.refund_note}` : ""}. It's excluded from revenue, collections and
+          admission counts everywhere (AOP, dashboard, team, org, annual plan) — the record itself hasn't been
+          deleted.
+        </p>
+        {canManageRefund && (
+          <button className="btn secondary small" disabled={busy} onClick={undoRefund}>
+            {busy ? "Undoing…" : "Undo refund"}
+          </button>
+        )}
+        {error && <div className="error-text" style={{ marginTop: 10 }}>{error}</div>}
+      </div>
+    );
+  }
+
+  if (!canManageRefund) return null;
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <span className="kicker">Refund</span>
+        <h2 className="card-title">Mark refunded</h2>
+      </div>
+      {!open ? (
+        <>
+          <p className="comp-hint" style={{ marginBottom: 12 }}>
+            If this student has discontinued and been refunded, mark it here — it's dropped from revenue/collections
+            counts everywhere, but the record and payment history stay on file.
+          </p>
+          <button className="btn secondary small" onClick={() => setOpen(true)}>
+            Mark as refunded
+          </button>
+        </>
+      ) : (
+        <div className="field-grid">
+          <div className="field">
+            <label>Refund date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Refund amount</label>
+            <input className="money-input" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div className="field full">
+            <label>Note (optional)</label>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. reason for discontinuing" />
+          </div>
+          {error && <div className="error-text">{error}</div>}
+          <div className="field full" style={{ display: "flex", gap: 10 }}>
+            <button className="btn small" disabled={busy} onClick={confirmRefund}>
+              {busy ? "Saving…" : "Confirm refund"}
+            </button>
+            <button className="btn secondary small" disabled={busy} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ReceiptView({
   admission,
   payments = [],
-  fieldDefs = []
+  fieldDefs = [],
+  canManageRefund = false
 }: {
   admission: any;
   payments?: Payment[];
   fieldDefs?: CustomFieldDef[];
+  canManageRefund?: boolean;
 }) {
   const customEntries = fieldDefs
     .map((f) => ({ def: f, value: admission.custom_fields?.[f.field_key] }))
@@ -235,9 +350,18 @@ export default function ReceiptView({
           <Link href={`/admissions/${admission.id}/invoice`} className="btn secondary small">
             Print invoice
           </Link>
+          <Link href={`/admissions/${admission.id}/summary`} className="btn secondary small">
+            Fee summary
+          </Link>
         </div>
       </div>
       <div style={{ height: 16 }} />
+      {(admission.status === "refunded" || canManageRefund) && (
+        <>
+          <RefundControl admission={admission} canManageRefund={canManageRefund} />
+          <div style={{ height: 16 }} />
+        </>
+      )}
       <div className="grid-2">
         <div className="stack">
           <div className="card">
