@@ -58,7 +58,7 @@ export type CounselorCreateResult = {
 // reliable path when Supabase's own invite email isn't going out (rate-limited, in spam, or
 // the project's default email sending just isn't configured), and it works for any number of
 // people in one go.
-export async function createCounselorAccounts(rows: { fullName: string; email: string; role?: "counselor" | "manager" }[]) {
+export async function createCounselorAccounts(rows: { fullName: string; email: string; role?: "counselor" | "manager" | "accounts" }[]) {
   const supabase = supabaseServer();
   const {
     data: { user }
@@ -69,7 +69,11 @@ export async function createCounselorAccounts(rows: { fullName: string; email: s
   if (profile?.role !== "owner") return { error: "Only the owner can add counselors." };
 
   const cleaned = rows
-    .map((r) => ({ fullName: r.fullName.trim(), email: r.email.trim(), role: r.role === "manager" ? "manager" : "counselor" }))
+    .map((r) => ({
+      fullName: r.fullName.trim(),
+      email: r.email.trim(),
+      role: r.role === "manager" ? "manager" : r.role === "accounts" ? "accounts" : "counselor"
+    }))
     .filter((r) => r.email);
   if (!cleaned.length) return { error: "Add at least one row with an email." };
 
@@ -90,9 +94,9 @@ export async function createCounselorAccounts(rows: { fullName: string; email: s
       user_metadata: { full_name: row.fullName || undefined }
     });
     // New accounts are created as 'counselor' by the on_auth_user_created trigger; bump to
-    // 'manager' here when that's what was asked for (service role bypasses RLS for this).
-    if (!error && data?.user && row.role === "manager") {
-      await admin.from("profiles").update({ role: "manager" }).eq("id", data.user.id);
+    // 'manager'/'accounts' here when that's what was asked for (service role bypasses RLS for this).
+    if (!error && data?.user && (row.role === "manager" || row.role === "accounts")) {
+      await admin.from("profiles").update({ role: row.role }).eq("id", data.user.id);
     }
     results.push({
       email: row.email,
@@ -107,9 +111,9 @@ export async function createCounselorAccounts(rows: { fullName: string; email: s
   return { results };
 }
 
-// Promotes/demotes an existing account between 'counselor' and 'manager'. Uses the normal
-// (non-admin) client so the usual owner-only RLS policy on profiles enforces who can call this.
-export async function setCounselorRole(id: string, role: "counselor" | "manager") {
+// Promotes/demotes an existing account between 'counselor', 'manager' and 'accounts'. Uses the
+// normal (non-admin) client so the usual owner-only RLS policy on profiles enforces who can call this.
+export async function setCounselorRole(id: string, role: "counselor" | "manager" | "accounts") {
   const supabase = supabaseServer();
   const {
     data: { user }
