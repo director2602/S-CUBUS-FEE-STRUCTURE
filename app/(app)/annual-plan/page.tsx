@@ -34,7 +34,10 @@ export default async function AnnualPlanPage() {
     // below instead — a null admission_date would otherwise silently drop that admission out
     // of a database-side date-range filter, so an older record that was saved without one
     // still counts here, falling back to when the record was created.
-    supabase.from("admissions_computed").select("counselor_id, admission_date, created_at, actual_fees_paid, actual_payable, total_paid, outstanding")
+    supabase
+      .from("admissions_computed")
+      .select("counselor_id, admission_date, created_at, actual_fees_paid, actual_payable, total_paid, outstanding")
+      .eq("status", "active")
   ]);
 
   const assumptions: Assumptions = assumptionsRow
