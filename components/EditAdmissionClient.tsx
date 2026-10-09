@@ -10,12 +10,14 @@ export default function EditAdmissionClient({
   admission,
   batches,
   counselorId,
-  fieldDefs = []
+  fieldDefs = [],
+  canEditFees = true
 }: {
   admission: any;
   batches: Batch[];
   counselorId: string;
   fieldDefs?: CustomFieldDef[];
+  canEditFees?: boolean;
 }) {
   const router = useRouter();
 
@@ -36,6 +38,7 @@ export default function EditAdmissionClient({
         admissionId={admission.id}
         initial={admission}
         fieldDefs={fieldDefs}
+        canEditFees={canEditFees}
         onSaved={() => {
           router.push(`/admissions/${admission.id}`);
           router.refresh();
