@@ -44,7 +44,12 @@ export default function AdmissionsList({
     const handle = setTimeout(
       async () => {
         if (!term) {
-          const { data } = await supabase.from("admissions_computed").select(SELECT_COLS).order("created_at", { ascending: false }).limit(50);
+          const { data } = await supabase
+            .from("admissions_computed")
+            .select(SELECT_COLS)
+            .eq("status", "active")
+            .order("created_at", { ascending: false })
+            .limit(50);
           if (!cancelled) {
             setRows((data as Row[]) || []);
             setLoading(false);
@@ -52,11 +57,13 @@ export default function AdmissionsList({
           return;
         }
         // Two separate ilike queries (name, SCID) merged & deduped — avoids any ambiguity
-        // in how `%`/`,` need escaping inside a combined .or() filter string.
+        // in how `%`/`,` need escaping inside a combined .or() filter string. Refunded
+        // admissions are excluded here too — this list drives "update payments" / revenue
+        // workflows, not a historical lookup.
         const pattern = `%${term}%`;
         const [byName, byScid] = await Promise.all([
-          supabase.from("admissions_computed").select(SELECT_COLS).ilike("student_name", pattern).order("created_at", { ascending: false }).limit(25),
-          supabase.from("admissions_computed").select(SELECT_COLS).ilike("scid", pattern).order("created_at", { ascending: false }).limit(25)
+          supabase.from("admissions_computed").select(SELECT_COLS).eq("status", "active").ilike("student_name", pattern).order("created_at", { ascending: false }).limit(25),
+          supabase.from("admissions_computed").select(SELECT_COLS).eq("status", "active").ilike("scid", pattern).order("created_at", { ascending: false }).limit(25)
         ]);
         if (cancelled) return;
         const merged = new Map<string, Row>();
@@ -156,6 +163,9 @@ export default function AdmissionsList({
                       </Link>
                       <Link className="btn small secondary" href={`/admissions/${r.id}/invoice`}>
                         Print invoice
+                      </Link>
+                      <Link className="btn small secondary" href={`/admissions/${r.id}/summary`}>
+                        Fee summary
                       </Link>
                       <Link className="btn small secondary" href={`/admissions/${r.id}`}>
                         {r.pdf_path ? "View / re-sign" : "Sign & download"}
