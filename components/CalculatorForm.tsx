@@ -84,7 +84,12 @@ export default function CalculatorForm({
   mode = "create",
   admissionId,
   initial,
-  fieldDefs = []
+  fieldDefs = [],
+  // Only owner/manager/accounts can override a batch's registration/tuition/kit fee —
+  // counselors always get the batch's own numbers. The database enforces this independently
+  // (a trigger resets these columns for anyone else on save), so this just keeps the UI
+  // honest and in sync with what will actually be saved.
+  canEditFees = true
 }: {
   batches: Batch[];
   counselorId: string;
@@ -93,6 +98,7 @@ export default function CalculatorForm({
   admissionId?: string;
   initial?: any;
   fieldDefs?: CustomFieldDef[];
+  canEditFees?: boolean;
 }) {
   const supabase = supabaseBrowser();
   const [batchKey, setBatchKey] = useState(initial?.batch_key ?? batches[0]?.key ?? "");
@@ -465,35 +471,58 @@ export default function CalculatorForm({
             </select>
           </div>
 
+          {!canEditFees && (
+            <div className="comp-hint" style={{ marginBottom: 10 }}>
+              Fee amounts are fixed by the batch &mdash; only a manager, owner, or accounts can change them.
+            </div>
+          )}
           <div className="comp-row">
             <div>
               <div>Registration fee</div>
               <div className="comp-hint">Batch default: {formatINR(batch.reg_fee)}</div>
             </div>
-            <input className="money-input" type="number" value={regOverride ?? batch.reg_fee} onChange={(e) => setRegOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
-            <button className="reset-btn" disabled={regOverride == null} onClick={() => setRegOverride(null)}>
-              Reset
-            </button>
+            {canEditFees ? (
+              <input className="money-input" type="number" value={regOverride ?? batch.reg_fee} onChange={(e) => setRegOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
+            ) : (
+              <input className="money-input" value={formatINR(regOverride ?? batch.reg_fee)} readOnly style={{ background: "var(--bg)", color: "var(--muted)" }} />
+            )}
+            {canEditFees && (
+              <button className="reset-btn" disabled={regOverride == null} onClick={() => setRegOverride(null)}>
+                Reset
+              </button>
+            )}
           </div>
           <div className="comp-row">
             <div>
               <div>Tuition fee</div>
               <div className="comp-hint">Batch default: {formatINR(batch.tuition_fee)}</div>
             </div>
-            <input className="money-input" type="number" value={tuitionOverride ?? batch.tuition_fee} onChange={(e) => setTuitionOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
-            <button className="reset-btn" disabled={tuitionOverride == null} onClick={() => setTuitionOverride(null)}>
-              Reset
-            </button>
+            {canEditFees ? (
+              <input className="money-input" type="number" value={tuitionOverride ?? batch.tuition_fee} onChange={(e) => setTuitionOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
+            ) : (
+              <input className="money-input" value={formatINR(tuitionOverride ?? batch.tuition_fee)} readOnly style={{ background: "var(--bg)", color: "var(--muted)" }} />
+            )}
+            {canEditFees && (
+              <button className="reset-btn" disabled={tuitionOverride == null} onClick={() => setTuitionOverride(null)}>
+                Reset
+              </button>
+            )}
           </div>
           <div className="comp-row">
             <div>
               <div>Kit fee</div>
               <div className="comp-hint">Module + technology + uniform &mdash; batch default: {formatINR(batch.kit_fee)}</div>
             </div>
-            <input className="money-input" type="number" value={kitOverride ?? batch.kit_fee} onChange={(e) => setKitOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
-            <button className="reset-btn" disabled={kitOverride == null} onClick={() => setKitOverride(null)}>
-              Reset
-            </button>
+            {canEditFees ? (
+              <input className="money-input" type="number" value={kitOverride ?? batch.kit_fee} onChange={(e) => setKitOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
+            ) : (
+              <input className="money-input" value={formatINR(kitOverride ?? batch.kit_fee)} readOnly style={{ background: "var(--bg)", color: "var(--muted)" }} />
+            )}
+            {canEditFees && (
+              <button className="reset-btn" disabled={kitOverride == null} onClick={() => setKitOverride(null)}>
+                Reset
+              </button>
+            )}
           </div>
 
           <div className="sum-row total">
