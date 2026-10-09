@@ -138,4 +138,69 @@ export type Payment = {
   note: string | null;
   recorded_by: string | null;
   created_at: string;
+  invoice_no: string | null;
 };
+
+// ---- Tax invoice formatting helpers ----
+
+// Standard SAC code for "Commercial Training & Coaching Services" — same code used on
+// every line item since every admission is billing the same kind of service.
+export const HSN_SAC_CODE = "999294";
+
+export function formatINR2(n: number | null | undefined) {
+  if (n == null || Number.isNaN(n)) return "0.00";
+  return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// "Towards 2nd instalment of the course fees." style line used as the invoice item's
+// description — mirrors how each installment is billed on the printed tax invoice.
+export function installmentInvoiceDescription(label: string, note?: string | null) {
+  const base =
+    label === "Registration"
+      ? "Towards registration fee."
+      : label === "Installment 1"
+      ? "Towards 1st instalment of the course fees."
+      : label === "Installment 2"
+      ? "Towards 2nd instalment of the course fees."
+      : label === "Installment 3"
+      ? "Towards 3rd instalment of the course fees."
+      : "Towards course fees.";
+  return note ? `${base} (${note})` : base;
+}
+
+const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+function twoDigitsToWords(n: number): string {
+  if (n < 20) return ONES[n];
+  const t = Math.floor(n / 10);
+  const o = n % 10;
+  return TENS[t] + (o ? " " + ONES[o] : "");
+}
+
+function threeDigitsToWords(n: number): string {
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  return (h ? ONES[h] + " Hundred" + (rest ? " " : "") : "") + (rest ? twoDigitsToWords(rest) : "");
+}
+
+// Indian numbering (lakh/crore) amount-in-words, e.g. 1650000 -> "Sixteen Lakh Fifty
+// Thousand". Used for the "Total In Words" line on the printed tax invoice.
+export function numberToWordsIndian(n: number): string {
+  const num = Math.round(Math.abs(n));
+  if (num === 0) return "Zero";
+  const crore = Math.floor(num / 10000000);
+  const lakh = Math.floor((num % 10000000) / 100000);
+  const thousand = Math.floor((num % 100000) / 1000);
+  const hundred = num % 1000;
+  const parts: string[] = [];
+  if (crore) parts.push(threeDigitsToWords(crore) + " Crore");
+  if (lakh) parts.push(threeDigitsToWords(lakh) + " Lakh");
+  if (thousand) parts.push(threeDigitsToWords(thousand) + " Thousand");
+  if (hundred) parts.push(threeDigitsToWords(hundred));
+  return parts.join(" ");
+}
+
+export function amountInWordsINR(n: number) {
+  return `Indian Rupee ${numberToWordsIndian(n)} Only`;
+}
