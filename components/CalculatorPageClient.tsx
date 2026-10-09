@@ -10,11 +10,13 @@ export default function CalculatorPageClient({
   batches,
   counselorId,
   isOwner,
+  allAdmissions,
   fieldDefs = []
 }: {
   batches: Batch[];
   counselorId: string;
   isOwner: boolean;
+  allAdmissions?: boolean;
   fieldDefs?: CustomFieldDef[];
 }) {
   const [reloadToken, setReloadToken] = useState(0);
@@ -27,7 +29,7 @@ export default function CalculatorPageClient({
       </p>
       <CalculatorForm batches={batches} counselorId={counselorId} onSaved={() => setReloadToken((n) => n + 1)} fieldDefs={fieldDefs} />
       <div style={{ height: 32 }} />
-      <AdmissionsList isOwner={isOwner} reloadToken={reloadToken} />
+      <AdmissionsList isOwner={isOwner} allAdmissions={allAdmissions} reloadToken={reloadToken} />
     </>
   );
 }
