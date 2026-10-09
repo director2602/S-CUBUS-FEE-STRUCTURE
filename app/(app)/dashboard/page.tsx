@@ -37,7 +37,7 @@ export default async function DashboardPage() {
   const supabase = supabaseServer();
 
   const [{ data: rows }, { data: profiles }, { data: batchList }] = await Promise.all([
-    supabase.from("admissions_computed").select("*"),
+    supabase.from("admissions_computed").select("*").eq("status", "active"),
     supabase.from("profiles").select("id, full_name, email").eq("role", "counselor"),
     supabase
       .from("batches")
