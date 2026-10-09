@@ -14,7 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: profile } = await supabase.from("profiles").select("full_name, role, email").eq("id", user.id).single();
 
   const role = profile?.role || "counselor";
-  const roleLabel = role === "owner" ? "Owner" : role === "manager" ? "Manager" : "Counselor";
+  const roleLabel = role === "owner" ? "Owner" : role === "manager" ? "Manager" : role === "accounts" ? "Accounts" : "Counselor";
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
