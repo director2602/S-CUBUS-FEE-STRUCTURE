@@ -11,10 +11,11 @@ export default async function EditAdmissionPage({ params }: { params: { id: stri
     data: { user }
   } = await supabase.auth.getUser();
 
-  const [{ data: admission, error }, { data: batches }, { data: fieldDefRows }] = await Promise.all([
+  const [{ data: admission, error }, { data: batches }, { data: fieldDefRows }, { data: profile }] = await Promise.all([
     supabase.from("admissions_computed").select("*").eq("id", params.id).single(),
     supabase.from("batches").select("*").eq("active", true).order("sort_order"),
-    supabase.from("custom_field_defs").select("*").eq("entity", "admission").eq("active", true).order("sort_order")
+    supabase.from("custom_field_defs").select("*").eq("entity", "admission").eq("active", true).order("sort_order"),
+    supabase.from("profiles").select("role").eq("id", user!.id).single()
   ]);
 
   if (error || !admission) notFound();
@@ -36,6 +37,7 @@ export default async function EditAdmissionPage({ params }: { params: { id: stri
       batches={(batches as Batch[]) || []}
       counselorId={user!.id}
       fieldDefs={fieldDefs}
+      canEditFees={profile?.role !== "counselor"}
     />
   );
 }
