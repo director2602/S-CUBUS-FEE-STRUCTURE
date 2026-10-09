@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { formatINR, INSTALLMENT_LABELS, type Payment } from "@/lib/fee-calc";
 
@@ -211,7 +212,10 @@ export default function PaymentsPanel({
                   <td>{fmtDate(p.paid_on)}</td>
                   <td>{p.mode || "—"}</td>
                   <td>
-                    <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                      <Link className="reset-btn" href={`/admissions/${admissionId}/invoice?payment=${p.id}`}>
+                        Invoice
+                      </Link>
                       <button className="reset-btn" disabled={saving} onClick={() => startEdit(p)}>
                         Edit
                       </button>
