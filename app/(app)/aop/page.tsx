@@ -153,8 +153,48 @@ const DEFAULT_ASSUMPTIONS: Assumptions = {
   tax_rate: 25
 };
 
-type StaffRow = { id: string; role: string; department: string | null; headcount: number; monthly_salary: number; sort_order: number };
+// ---------- Multi-year fiscal-year support: selectable FY (2026-27, 2027-28, ...), with
+// projection (compounded on the latest saved year's own growth_rate assumption) for any
+// year that doesn't have a saved Annual Plan row yet, and YoY growth comparison across years ----------
+function fyStartYear(fy: string): number {
+  const m = /^(\d{4})/.exec(fy);
+  return m ? parseInt(m[1], 10) : new Date().getFullYear();
+}
+function fyLabel(startYear: number): string {
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+type AssumpSource = "saved" | "projected" | "default";
+type AssumptionsMeta = { source: AssumpSource; baseYear?: string };
+
+function resolveAssumptionsForYear(fy: string, allRows: Assumptions[]): { data: Assumptions; meta: AssumptionsMeta } {
+  const exact = allRows.find((a) => a.fiscal_year === fy);
+  if (exact) return { data: exact, meta: { source: "saved" } };
+  const sy = fyStartYear(fy);
+  const priorCandidates = allRows
+    .map((a) => ({ a, sy: fyStartYear(a.fiscal_year) }))
+    .filter((x) => x.sy < sy)
+    .sort((x, y) => y.sy - x.sy);
+  if (priorCandidates.length > 0) {
+    const { a: base, sy: baseSy } = priorCandidates[0];
+    const yearsOut = sy - baseSy;
+    const growthFactor = Math.pow(1 + (Number(base.growth_rate) || 0) / 100, yearsOut);
+    return {
+      data: { ...base, fiscal_year: fy, students: Math.max(0, Math.round(Number(base.students) * growthFactor)) },
+      meta: { source: "projected", baseYear: base.fiscal_year }
+    };
+  }
+  return { data: { ...DEFAULT_ASSUMPTIONS, fiscal_year: fy }, meta: { source: "default" } };
+}
+
+function yoyGrowth(curr: number, prev: number | null | undefined): number | null {
+  if (prev == null || prev === 0) return null;
+  return (curr - prev) / prev;
+}
+
+type StaffRow = { id: string; fiscal_year: string; role: string; department: string | null; headcount: number; monthly_salary: number; sort_order: number };
 type ActualCostRow = {
+  fiscal_year: string;
   month_index: number;
   teaching_cost: number;
   marketing_cost: number;
@@ -237,9 +277,10 @@ function computeMonthly(plan: Plan, a: Assumptions): MonthRow[] {
   });
 }
 
-function fyMonthProgress() {
-  const fyStart = new Date(2026, 3, 1);
-  const fyEnd = new Date(2027, 3, 1);
+function fyMonthProgress(fy: string) {
+  const sy = fyStartYear(fy);
+  const fyStart = new Date(sy, 3, 1);
+  const fyEnd = new Date(sy + 1, 3, 1);
   const today = new Date();
   if (today < fyStart) return 0;
   if (today >= fyEnd) return 12;
@@ -287,20 +328,21 @@ function mapProgramName(batchKey: string, batchLabel: string | null, batchGroup:
   return batchGroup || "Other";
 }
 
-function computeActualMonthlySeries(rows: AdmissionRow[]) {
+function computeActualMonthlySeries(rows: AdmissionRow[], fy: string) {
+  const sy = fyStartYear(fy);
   const cumStudents = new Array(12).fill(0);
   const cumRevenue = new Array(12).fill(0);
   rows.forEach((r) => {
     if (!r.admission_date) return;
     const d = new Date(r.admission_date);
-    let idx = (d.getFullYear() - 2026) * 12 + (d.getMonth() - 3);
-    idx = Math.max(0, Math.min(11, idx));
+    const idx = (d.getFullYear() - sy) * 12 + (d.getMonth() - 3);
+    if (idx < 0 || idx > 11) return;
     for (let i = idx; i < 12; i++) {
       cumStudents[i] += 1;
       cumRevenue[i] += (Number(r.net_excl_gst) || 0) / 100000;
     }
   });
-  const todayIdx = Math.max(0, Math.min(11, Math.floor(fyMonthProgress())));
+  const todayIdx = Math.max(0, Math.min(11, Math.floor(fyMonthProgress(fy))));
   const students: (number | null)[] = [];
   const revenue: (number | null)[] = [];
   for (let i = 0; i < 12; i++) {
@@ -363,15 +405,55 @@ function emptyAgg(): ActualAgg {
   return { students: 0, gross: 0, scholarship: 0, netExclGst: 0, gstAmount: 0, actualPayable: 0, collected: 0 };
 }
 
+// One fiscal year's plan vs actual, for the Year-over-Year Growth comparison. Actuals are
+// counted only up to `asOfProgCap` months into the fiscal year (the real-world "today" point
+// in the CURRENT fiscal year) so a completed historical year is compared like-for-like
+// against a still-in-progress current year, not full-year-vs-partial-year.
+function computeYearSummary(fy: string, allAssumptionsRows: Assumptions[], allAdmissions: AdmissionRow[], asOfProgCap: number) {
+  const { data: a, meta } = resolveAssumptionsForYear(fy, allAssumptionsRows);
+  const plan = computePlan(a);
+  const monthlyRows = computeMonthly(plan, a);
+  const naturalProg = fyMonthProgress(fy);
+  const ytdProg = Math.max(0, Math.min(naturalProg, asOfProgCap));
+  const ytdMonthIdx = Math.floor(ytdProg);
+  const ytdPlan = computeExpectedToDate(monthlyRows, ytdProg);
+  const sy = fyStartYear(fy);
+  let students = 0;
+  let netExclGst = 0;
+  allAdmissions.forEach((r) => {
+    if (!r.admission_date) return;
+    const d = new Date(r.admission_date);
+    const idx = (d.getFullYear() - sy) * 12 + (d.getMonth() - 3);
+    if (idx < 0 || idx > ytdMonthIdx) return;
+    students += 1;
+    netExclGst += Number(r.net_excl_gst) || 0;
+  });
+  return {
+    fy,
+    meta,
+    growthTarget: Number(a.growth_rate) || 0,
+    planStudents: plan.totalStudents,
+    planRevenueLakh: plan.revenueLakh,
+    ytdPlanRevenueLakh: ytdPlan.revenueLakh,
+    ytdActualStudents: students,
+    ytdActualRevenueLakh: netExclGst / 100000
+  };
+}
+
 export default function AopActualsPage() {
   const [status, setStatus] = useState<"loading" | "denied" | "error" | "ready">("loading");
-  const [rows, setRows] = useState<AdmissionRow[]>([]);
-  const [assumptions, setAssumptions] = useState<Assumptions>(DEFAULT_ASSUMPTIONS);
-  const [assumptionsLive, setAssumptionsLive] = useState(false);
-  const [staff, setStaff] = useState<StaffRow[]>([]);
-  const [actualCosts, setActualCosts] = useState<ActualCostRow[]>([]);
+  const [allAdmissions, setAllAdmissions] = useState<AdmissionRow[]>([]);
+  const [allAssumptionsRows, setAllAssumptionsRows] = useState<Assumptions[]>([]);
+  const [allStaffRows, setAllStaffRows] = useState<StaffRow[]>([]);
+  const [allActualCostRows, setAllActualCostRows] = useState<ActualCostRow[]>([]);
   const [asOf, setAsOf] = useState("");
   const [dark, setDark] = useState(false);
+  const [selectedFY, setSelectedFY] = useState(currentFiscalYear());
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  useEffect(() => {
+    setSaveStatus("idle");
+  }, [selectedFY]);
 
   useEffect(() => {
     try {
@@ -397,7 +479,6 @@ export default function AopActualsPage() {
 
   useEffect(() => {
     const supabase = createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const fy = currentFiscalYear();
     (async () => {
       const {
         data: { user }
@@ -411,38 +492,71 @@ export default function AopActualsPage() {
         setStatus("denied");
         return;
       }
+      // Fetch every fiscal year at once (small, owner-only planning tables) so switching the
+      // year selector is instant and the Year-over-Year comparison can span all years in memory.
       const [admRes, assumpRes, staffRes, costsRes] = await Promise.all([
         supabase
           .from("admissions_computed")
           .select("batch_key,batch_label,batch_group,admission_date,gross_fee,scholarship_amount,net_excl_gst,gst_amount,actual_payable,total_paid"),
-        supabase.from("aop_assumptions").select("*").eq("fiscal_year", fy).maybeSingle(),
-        supabase.from("aop_staff").select("id,role,department,headcount,monthly_salary,sort_order").eq("fiscal_year", fy).order("sort_order"),
-        supabase.from("aop_actual_costs").select("month_index,teaching_cost,marketing_cost,admin_cost,rent,other_overheads").eq("fiscal_year", fy)
+        supabase.from("aop_assumptions").select("*"),
+        supabase.from("aop_staff").select("id,fiscal_year,role,department,headcount,monthly_salary,sort_order").order("sort_order"),
+        supabase.from("aop_actual_costs").select("fiscal_year,month_index,teaching_cost,marketing_cost,admin_cost,rent,other_overheads")
       ]);
       if (admRes.error) {
         setStatus("error");
         return;
       }
-      setRows((admRes.data || []) as AdmissionRow[]);
-      if (!assumpRes.error && assumpRes.data) {
-        setAssumptions({ ...DEFAULT_ASSUMPTIONS, ...(assumpRes.data as any) });
-        setAssumptionsLive(true);
-      } else {
-        setAssumptions({ ...DEFAULT_ASSUMPTIONS, fiscal_year: fy });
-        setAssumptionsLive(false);
-      }
-      if (!staffRes.error) setStaff((staffRes.data || []) as StaffRow[]);
-      if (!costsRes.error) setActualCosts((costsRes.data || []) as ActualCostRow[]);
+      setAllAdmissions((admRes.data || []) as AdmissionRow[]);
+      if (!assumpRes.error) setAllAssumptionsRows(((assumpRes.data || []) as any[]).map((r) => ({ ...DEFAULT_ASSUMPTIONS, ...r })));
+      if (!staffRes.error) setAllStaffRows((staffRes.data || []) as StaffRow[]);
+      if (!costsRes.error) setAllActualCostRows((costsRes.data || []) as ActualCostRow[]);
       setAsOf(new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }));
       setStatus("ready");
     })();
   }, []);
 
+  async function saveProjectedAsPlan() {
+    setSaveStatus("saving");
+    const supabase = createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { fiscal_year, ...rest } = resolveAssumptionsForYear(selectedFY, allAssumptionsRows).data;
+    const { error } = await supabase.from("aop_assumptions").insert({ fiscal_year: selectedFY, ...rest });
+    if (error) {
+      setSaveStatus("error");
+      return;
+    }
+    setAllAssumptionsRows((prev) => [...prev, { ...rest, fiscal_year: selectedFY }]);
+    setSaveStatus("saved");
+  }
+
+  const FY_OPTIONS = useMemo(() => {
+    const nowSy = fyStartYear(currentFiscalYear());
+    const set = new Set<string>();
+    for (let y = nowSy - 1; y <= nowSy + 4; y++) set.add(fyLabel(y));
+    allAssumptionsRows.forEach((a) => set.add(a.fiscal_year));
+    return Array.from(set).sort();
+  }, [allAssumptionsRows]);
+
+  const { data: assumptions, meta: assumptionsMeta } = useMemo(
+    () => resolveAssumptionsForYear(selectedFY, allAssumptionsRows),
+    [selectedFY, allAssumptionsRows]
+  );
+  const staff = useMemo(() => allStaffRows.filter((s) => s.fiscal_year === selectedFY), [allStaffRows, selectedFY]);
+  const actualCosts = useMemo(() => allActualCostRows.filter((c) => c.fiscal_year === selectedFY), [allActualCostRows, selectedFY]);
+  const rows = useMemo(() => {
+    const sy = fyStartYear(selectedFY);
+    return allAdmissions.filter((r) => {
+      if (!r.admission_date) return false;
+      const d = new Date(r.admission_date);
+      const idx = (d.getFullYear() - sy) * 12 + (d.getMonth() - 3);
+      return idx >= 0 && idx <= 11;
+    });
+  }, [allAdmissions, selectedFY]);
+
   const plan = useMemo(() => computePlan(assumptions), [assumptions]);
   const monthlyRows = useMemo(() => computeMonthly(plan, assumptions), [plan, assumptions]);
-  const fyProg = useMemo(() => fyMonthProgress(), []);
+  const fyProg = useMemo(() => fyMonthProgress(selectedFY), [selectedFY]);
   const exp = useMemo(() => computeExpectedToDate(monthlyRows, fyProg), [monthlyRows, fyProg]);
-  const actualSeries = useMemo(() => computeActualMonthlySeries(rows), [rows]);
+  const actualSeries = useMemo(() => computeActualMonthlySeries(rows, selectedFY), [rows, selectedFY]);
 
   const act = useMemo(() => {
     const totals = emptyAgg();
@@ -540,6 +654,20 @@ export default function AopActualsPage() {
   const pbtRag = ragHigherBetter(pbtRatio, 0.9, 0.7);
   const patRag = ragHigherBetter(patRatio, 0.9, 0.7);
 
+  // ---- Year-over-Year Growth (spans all fiscal years, not just the selected one) ----
+  const currentRealProg = useMemo(() => fyMonthProgress(currentFiscalYear()), []);
+  const YOY_YEARS = useMemo(() => {
+    const nowSy = fyStartYear(currentFiscalYear());
+    const set = new Set<string>();
+    for (let y = nowSy - 2; y <= nowSy + 3; y++) set.add(fyLabel(y));
+    allAssumptionsRows.forEach((a) => set.add(a.fiscal_year));
+    return Array.from(set).sort();
+  }, [allAssumptionsRows]);
+  const yearSummaries = useMemo(
+    () => YOY_YEARS.map((fy) => computeYearSummary(fy, allAssumptionsRows, allAdmissions, currentRealProg)),
+    [YOY_YEARS, allAssumptionsRows, allAdmissions, currentRealProg]
+  );
+
   if (status === "loading") {
     return <div style={{ padding: 40, fontFamily: "system-ui, sans-serif" }}>Loading live admissions data…</div>;
   }
@@ -610,7 +738,7 @@ export default function AopActualsPage() {
   }
   const SCENARIOS = [
     { label: "Downside", students: Math.round(plan.totalStudents * 0.75), arpu: Math.round(plan.blendedArpu * 0.9), action: "Freeze hiring; cut discretionary marketing to protect margin" },
-    { label: "Base (plan)", students: plan.totalStudents, arpu: plan.blendedArpu, action: "Run the FY27 plan as built" },
+    { label: "Base (plan)", students: plan.totalStudents, arpu: plan.blendedArpu, action: `Run the ${selectedFY} plan as built` },
     { label: "Upside", students: Math.round(plan.totalStudents * 1.17), arpu: Math.round(plan.blendedArpu * 1.05), action: "Add faculty/batches only after occupancy confirms the extra demand is real" }
   ];
 
@@ -619,31 +747,121 @@ export default function AopActualsPage() {
   return (
     <div style={{ background: T.pagePlane, minHeight: "100vh" }}>
       <div style={{ maxWidth: 1140, margin: "0 auto", padding: "24px 20px 60px", fontFamily: "system-ui, sans-serif", color: T.textPrimary }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 4 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 4, flexWrap: "wrap" }}>
           <div>
             <h1 style={{ fontSize: 20, margin: 0 }}>Annual Operating Plan &mdash; Expectations vs Actuals</h1>
             <p style={{ color: T.textSecondary, fontSize: 13, marginTop: 6, marginBottom: 0 }}>
-              Director &amp; Owner only. Plan figures load live from the Annual Plan assumptions ({assumptions.fiscal_year || currentFiscalYear()}
-              {assumptionsLive ? "" : " — no saved assumptions found, showing defaults"}); actuals load live from admissions &mdash; last refreshed {asOf}.
+              Director &amp; Owner only. Viewing fiscal year <strong>{selectedFY}</strong>
+              {assumptionsMeta.source === "saved" && " — plan figures load live from the saved Annual Plan assumptions"}
+              {assumptionsMeta.source === "projected" &&
+                ` — no plan saved yet for ${selectedFY}; figures below are projected from ${assumptionsMeta.baseYear}'s plan at its ${assumptions.growth_rate}% growth-rate assumption`}
+              {assumptionsMeta.source === "default" && " — no saved plan or earlier year found; showing template defaults"}; actuals load
+              live from admissions &mdash; last refreshed {asOf}.
             </p>
           </div>
-          <button
-            onClick={toggleDark}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: T.textSecondary }}>
+              Fiscal year
+              <select
+                value={selectedFY}
+                onChange={(e) => setSelectedFY(e.target.value)}
+                style={{
+                  border: `1px solid ${T.border}`,
+                  background: T.surface,
+                  color: T.textPrimary,
+                  borderRadius: 8,
+                  padding: "6px 10px",
+                  fontSize: 12.5,
+                  fontWeight: 600
+                }}
+              >
+                {FY_OPTIONS.map((fy) => (
+                  <option key={fy} value={fy}>
+                    {fy}
+                    {fy === currentFiscalYear() ? " (current)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={toggleDark}
+              style={{
+                flexShrink: 0,
+                border: `1px solid ${T.border}`,
+                background: T.surface,
+                color: T.textPrimary,
+                borderRadius: 999,
+                padding: "6px 14px",
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer"
+              }}
+            >
+              {dark ? "☀ Light mode" : "☾ Dark mode"}
+            </button>
+          </div>
+        </div>
+
+        {assumptionsMeta.source === "projected" && (
+          <div
             style={{
-              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              background: T.surfaceAlt,
               border: `1px solid ${T.border}`,
-              background: T.surface,
-              color: T.textPrimary,
-              borderRadius: 999,
-              padding: "6px 14px",
+              borderRadius: 10,
+              padding: "10px 14px",
+              marginTop: 14,
+              marginBottom: 4,
               fontSize: 12.5,
-              fontWeight: 600,
-              cursor: "pointer"
+              color: T.textSecondary
             }}
           >
-            {dark ? "☀ Light mode" : "☾ Dark mode"}
-          </button>
-        </div>
+            <span>
+              Showing a <strong>projection</strong> for {selectedFY} &mdash; {assumptions.students} students at {assumptionsMeta.baseYear}
+              &rsquo;s {assumptions.growth_rate}% growth-rate assumption, fees and cost ratios carried forward unchanged. Nothing is saved
+              yet.
+            </span>
+            <button
+              onClick={saveProjectedAsPlan}
+              disabled={saveStatus === "saving"}
+              style={{
+                flexShrink: 0,
+                border: "none",
+                background: T.good,
+                color: "#ffffff",
+                borderRadius: 999,
+                padding: "6px 14px",
+                fontSize: 12.5,
+                fontWeight: 700,
+                cursor: saveStatus === "saving" ? "default" : "pointer"
+              }}
+            >
+              {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved ✓" : `Save this as the Annual Plan for ${selectedFY}`}
+            </button>
+          </div>
+        )}
+        {saveStatus === "error" && <p style={{ color: T.critical, fontSize: 12.5, marginTop: 8 }}>Couldn&rsquo;t save &mdash; please try again.</p>}
+        {assumptionsMeta.source === "default" && (
+          <div
+            style={{
+              background: T.surfaceAlt,
+              border: `1px solid ${T.border}`,
+              borderRadius: 10,
+              padding: "10px 14px",
+              marginTop: 14,
+              marginBottom: 4,
+              fontSize: 12.5,
+              color: T.textSecondary
+            }}
+          >
+            No Annual Plan has been saved for {selectedFY} and there&rsquo;s no earlier year to project from, so this is showing template
+            default numbers. Set real assumptions on the Annual Plan page.
+          </div>
+        )}
 
         <Section T={T} title="Expectations vs Actuals" kicker="Reality check">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
@@ -798,12 +1016,22 @@ export default function AopActualsPage() {
           </p>
         </Section>
 
-        <Section T={T} title="Annual Plan Assumptions" kicker={assumptionsLive ? "Live from Annual Plan" : "Defaults — no saved plan found"}>
+        <Section
+          T={T}
+          title="Annual Plan Assumptions"
+          kicker={
+            assumptionsMeta.source === "saved"
+              ? "Live from Annual Plan"
+              : assumptionsMeta.source === "projected"
+              ? `Projected from ${assumptionsMeta.baseYear}`
+              : "Defaults — no saved plan found"
+          }
+        >
           <table style={tableStyle(T)}>
             <tbody>
               <tr>
                 <td style={td(T)}>Fiscal year</td>
-                <td style={tdNum(T)}>{assumptions.fiscal_year || currentFiscalYear()}</td>
+                <td style={tdNum(T)}>{assumptions.fiscal_year}</td>
               </tr>
               <tr>
                 <td style={td(T)}>Target students</td>
@@ -894,6 +1122,80 @@ export default function AopActualsPage() {
               <p style={noteStyle(T)}>Shown for reference only &mdash; this staffing list is informational and isn&rsquo;t yet reconciled into the Teaching cost % above.</p>
             </>
           )}
+        </Section>
+
+        <Section T={T} title="Year-over-Year Growth" kicker="Across fiscal years">
+          <p style={noteStyle(T)}>
+            Actuals below are counted only up to the same point in each year&rsquo;s own fiscal calendar as today
+            ({fmtLakh(currentRealProg, 1)} months into {currentFiscalYear()}), so a completed historical year isn&rsquo;t compared
+            full-year against a current year that&rsquo;s still in progress.
+          </p>
+          <table style={tableStyle(T)}>
+            <thead>
+              <tr>
+                <th style={th(T)}>Fiscal Year</th>
+                <th style={thNum(T)}>Plan Students (full yr)</th>
+                <th style={thNum(T)}>Actual Students (YTD)</th>
+                <th style={thNum(T)}>Plan Revenue ₹L (full yr)</th>
+                <th style={thNum(T)}>Actual Revenue ₹L (YTD)</th>
+                <th style={thNum(T)}>YoY Plan Growth</th>
+                <th style={thNum(T)}>YoY Actual Growth</th>
+                <th style={th(T)}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {yearSummaries.map((y, i) => {
+                const prevY = i > 0 ? yearSummaries[i - 1] : null;
+                const planGrowth = prevY ? yoyGrowth(y.planRevenueLakh, prevY.planRevenueLakh) : null;
+                const actualGrowth = prevY ? yoyGrowth(y.ytdActualRevenueLakh, prevY.ytdActualRevenueLakh) : null;
+                const yRag = ragHigherBetter(y.ytdPlanRevenueLakh > 0 ? y.ytdActualRevenueLakh / y.ytdPlanRevenueLakh : null, 0.95, 0.75);
+                return (
+                  <tr key={y.fy} style={y.fy === selectedFY ? { background: T.surfaceAlt } : undefined}>
+                    <td style={td(T)}>
+                      {y.fy}
+                      {y.meta.source === "projected" && (
+                        <span style={{ fontSize: 10, color: T.muted, marginLeft: 6 }}>(projected)</span>
+                      )}
+                      {y.meta.source === "default" && <span style={{ fontSize: 10, color: T.muted, marginLeft: 6 }}>(no plan)</span>}
+                    </td>
+                    <td style={tdNum(T)}>{y.planStudents}</td>
+                    <td style={tdNum(T)}>{y.ytdActualStudents}</td>
+                    <td style={tdNum(T)}>{fmtLakh(y.planRevenueLakh, 2)}</td>
+                    <td style={tdNum(T)}>{fmtLakh(y.ytdActualRevenueLakh, 2)}</td>
+                    <td style={tdNum(T)}>{planGrowth != null ? fmtPct(planGrowth) : "—"}</td>
+                    <td style={tdNum(T)}>{actualGrowth != null ? fmtPct(actualGrowth) : "—"}</td>
+                    <td style={td(T)}>
+                      <Badge T={T} rag={yRag} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <RagChartBlock
+            T={T}
+            title="Revenue by fiscal year — Plan (full year) vs Actual (year-to-date), ₹L"
+            status={{ cls: "good", label: "" }}
+            hideBadge
+          >
+            <GroupedBarChart
+              T={T}
+              labels={yearSummaries.map((y) => y.fy)}
+              planValues={yearSummaries.map((y) => y.planRevenueLakh)}
+              actualValues={yearSummaries.map((y) => y.ytdActualRevenueLakh)}
+              actualStatus={yearSummaries.map(
+                (y) => ragHigherBetter(y.ytdPlanRevenueLakh > 0 ? y.ytdActualRevenueLakh / y.ytdPlanRevenueLakh : null, 0.95, 0.75).cls
+              )}
+            />
+          </RagChartBlock>
+          <p style={noteStyle(T)}>
+            YoY Plan Growth compares each year&rsquo;s full annual plan ambition to the previous year&rsquo;s. YoY Actual Growth compares
+            live admissions counted to the same point in the fiscal year across years, so it stays fair while the current year is still in
+            progress. Years with no saved Annual Plan show a projection based on the latest saved year&rsquo;s growth-rate assumption &mdash;
+            select that year above and use &ldquo;Save this as the Annual Plan&rdquo; to lock it in. Actual EBITDA/PBT/PAT aren&rsquo;t
+            compared year-over-year yet because no monthly actual costs have been logged in any year so far &mdash; once they are, this
+            section can be extended the same way.
+          </p>
         </Section>
 
         <Section T={T} title="Annual Operating P&L (plan run-rate, ₹ lakh)" kicker="Full-year plan">
