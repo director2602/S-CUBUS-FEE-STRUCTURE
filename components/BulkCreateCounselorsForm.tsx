@@ -3,15 +3,16 @@
 import { useState, useTransition } from "react";
 import { createCounselorAccounts, type CounselorCreateResult } from "@/app/actions/counselors";
 
-function parseRows(text: string): { fullName: string; email: string; role: "counselor" | "manager" }[] {
+function parseRows(text: string): { fullName: string; email: string; role: "counselor" | "manager" | "accounts" }[] {
   return text
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      // Accepts "Name, email", "Name, email, manager", or just "email" per line.
+      // Accepts "Name, email", "Name, email, manager", "Name, email, accounts", or just "email" per line.
       const parts = line.split(",").map((p) => p.trim());
-      const role: "counselor" | "manager" = parts[2]?.toLowerCase() === "manager" ? "manager" : "counselor";
+      const roleFlag = parts[2]?.toLowerCase();
+      const role: "counselor" | "manager" | "accounts" = roleFlag === "manager" ? "manager" : roleFlag === "accounts" ? "accounts" : "counselor";
       if (parts.length >= 2) return { fullName: parts[0], email: parts[1], role };
       return { fullName: "", email: parts[0], role: "counselor" };
     });
@@ -70,13 +71,14 @@ export default function BulkCreateCounselorsForm() {
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={"Kiran, kiran@scubus.com\nPriya, priya@scubus.com, manager"}
+            placeholder={"Kiran, kiran@scubus.com\nPriya, priya@scubus.com, manager\nAccounts, accounts@scubus.com, accounts"}
             rows={5}
             style={{ width: "100%", fontFamily: "inherit", fontSize: 14, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--line)" }}
           />
           <div className="comp-hint">
-            "Name, email" per line, or just an email on its own. Add ", manager" at the end of a line to create a
-            manager instead of a counselor. {rows.length > 0 ? `${rows.length} account${rows.length === 1 ? "" : "s"} ready.` : ""}
+            "Name, email" per line, or just an email on its own. Add ", manager" to create a manager, or ", accounts"
+            to create an accounts login that can find and update any admission's fees and payments (but can't delete
+            admissions or manage other logins). {rows.length > 0 ? `${rows.length} account${rows.length === 1 ? "" : "s"} ready.` : ""}
           </div>
         </div>
         {error && <div className="error-text">{error}</div>}
