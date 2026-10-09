@@ -239,4 +239,347 @@ export default function CalculatorForm({
       mode_reg: notes.modeReg || null,
       mode1: notes.mode1 || null,
       mode2: notes.mode2 || null,
-      mode3:
+      mode3: notes.mode3 || null,
+      pdc1: notes.pdc1 || null,
+      pdc2: notes.pdc2 || null,
+      remarks: notes.remarks || null,
+      custom_fields: cleanCustomFieldValues(customValues)
+    };
+
+    const { error } =
+      mode === "edit" && admissionId
+        ? await supabase.from("admissions").update(payload).eq("id", admissionId)
+        : await supabase.from("admissions").insert({ ...payload, counselor_id: counselorId });
+
+    setSaving(false);
+    if (error) {
+      // Unique-violation on SCID: another counselor's save landed first and took this exact
+      // number in the moment between us fetching it and saving. Get a fresh one automatically
+      // rather than leaving the counselor to figure out what went wrong.
+      if ((error as any).code === "23505" && mode === "create") {
+        setError("That SCID was just taken by another admission saved a moment ago — fetched the next one, please save again.");
+        refreshScid();
+        return;
+      }
+      setError(error.message);
+      return;
+    }
+
+    if (mode === "edit") {
+      setSavedMsg("Changes saved.");
+      onSaved?.();
+      return;
+    }
+
+    setSavedMsg(`Saved ${student.name}'s admission.`);
+    setStudent(emptyStudent);
+    setNotes(emptyNotes);
+    setScholarshipPct(null);
+    setAdditionalDiscount(0);
+    setActualFeesPaid(0);
+    setRegOverride(null);
+    setTuitionOverride(null);
+    setKitOverride(null);
+    setCustomValues({});
+    refreshScid();
+    onSaved?.();
+  }
+
+  if (!batch || !result) return null;
+
+  return (
+    <div className="grid-2">
+      <div className="stack">
+        <div className="card">
+          <div className="card-head">
+            <span className="kicker">01</span>
+            <h2 className="card-title">Student &amp; Admission</h2>
+          </div>
+          <div className="field-grid">
+            <div className="field">
+              <label>SCID</label>
+              {mode === "create" ? (
+                <>
+                  <input value={scidLoading ? "Assigning…" : student.scid} readOnly style={{ background: "var(--bg)", color: "var(--muted)" }} />
+                  <div className="comp-hint">
+                    Auto-assigned, next in sequence for FY {currentFiscalYear()}.{" "}
+                    <button type="button" className="reset-btn" style={{ display: "inline", padding: 0 }} onClick={refreshScid} disabled={scidLoading}>
+                      Refresh
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <input value={student.scid} onChange={(e) => setStudent({ ...student, scid: e.target.value })} placeholder="SC2627-0001" />
+              )}
+            </div>
+            <div className="field">
+              <label>Student name</label>
+              <input value={student.name} onChange={(e) => setStudent({ ...student, name: e.target.value })} placeholder="e.g. Mehak" />
+            </div>
+            <div className="field">
+              <label>Mother's name</label>
+              <input value={student.mother} onChange={(e) => setStudent({ ...student, mother: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Father's name</label>
+              <input value={student.father} onChange={(e) => setStudent({ ...student, father: e.target.value })} />
+            </div>
+            <div className="field full">
+              <label>Email</label>
+              <input type="email" value={student.email} onChange={(e) => setStudent({ ...student, email: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Contact (primary)</label>
+              <input value={student.phone1} onChange={(e) => setStudent({ ...student, phone1: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Contact (secondary)</label>
+              <input value={student.phone2} onChange={(e) => setStudent({ ...student, phone2: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Date of admission</label>
+              <input
+                type="date"
+                required
+                value={student.admissionDate}
+                onChange={(e) => setStudent({ ...student, admissionDate: e.target.value })}
+              />
+              <div className="comp-hint">Drives every fiscal-year total on the Dashboard and Annual Plan pages — required.</div>
+            </div>
+            <div className="field">
+              <label>Batch commencement</label>
+              <input type="date" value={student.batchStart} onChange={(e) => setStudent({ ...student, batchStart: e.target.value })} />
+            </div>
+            <CustomFieldInputs
+              defs={fieldDefs}
+              values={customValues}
+              onChange={(key, value) => setCustomValues((prev) => ({ ...prev, [key]: value }))}
+            />
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <span className="kicker">05</span>
+            <h2 className="card-title">Payment Mode &amp; Notes</h2>
+          </div>
+          <div className="field-grid">
+            <div className="field">
+              <label>Registration fee mode</label>
+              <input value={notes.modeReg} onChange={(e) => setNotes({ ...notes, modeReg: e.target.value })} placeholder="e.g. UPI" />
+            </div>
+            <div className="field">
+              <label>Installment 1 mode</label>
+              <input value={notes.mode1} onChange={(e) => setNotes({ ...notes, mode1: e.target.value })} placeholder="e.g. Online transfer" />
+            </div>
+            <div className="field">
+              <label>Installment 2 mode</label>
+              <input value={notes.mode2} onChange={(e) => setNotes({ ...notes, mode2: e.target.value })} placeholder="e.g. PDC" />
+            </div>
+            <div className="field">
+              <label>Installment 3 mode</label>
+              <input value={notes.mode3} onChange={(e) => setNotes({ ...notes, mode3: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>PDC cheque no. 1</label>
+              <input value={notes.pdc1} onChange={(e) => setNotes({ ...notes, pdc1: e.target.value })} placeholder="000123" />
+            </div>
+            <div className="field">
+              <label>PDC cheque no. 2</label>
+              <input value={notes.pdc2} onChange={(e) => setNotes({ ...notes, pdc2: e.target.value })} placeholder="000124" />
+            </div>
+            <div className="field full">
+              <label>Remarks</label>
+              <input value={notes.remarks} onChange={(e) => setNotes({ ...notes, remarks: e.target.value })} placeholder="e.g. Balance via post-dated cheque" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="stack">
+        <div className="card">
+          <div className="card-head">
+            <span className="kicker">02</span>
+            <h2 className="card-title">Batch &amp; Fee Components</h2>
+          </div>
+          <div className="field full" style={{ marginBottom: 18 }}>
+            <label>Batch</label>
+            <select value={batchKey} onChange={(e) => resetAllForNewBatch(e.target.value)} style={{ fontWeight: 600, fontSize: 16, padding: "12px 13px" }}>
+              {groups.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.items.map((b) => (
+                    <option key={b.key} value={b.key}>
+                      {b.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+
+          <div className="comp-row">
+            <div>
+              <div>Registration fee</div>
+              <div className="comp-hint">Batch default: {formatINR(batch.reg_fee)}</div>
+            </div>
+            <input className="money-input" type="number" value={regOverride ?? batch.reg_fee} onChange={(e) => setRegOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
+            <button className="reset-btn" disabled={regOverride == null} onClick={() => setRegOverride(null)}>
+              Reset
+            </button>
+          </div>
+          <div className="comp-row">
+            <div>
+              <div>Tuition fee</div>
+              <div className="comp-hint">Batch default: {formatINR(batch.tuition_fee)}</div>
+            </div>
+            <input className="money-input" type="number" value={tuitionOverride ?? batch.tuition_fee} onChange={(e) => setTuitionOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
+            <button className="reset-btn" disabled={tuitionOverride == null} onClick={() => setTuitionOverride(null)}>
+              Reset
+            </button>
+          </div>
+          <div className="comp-row">
+            <div>
+              <div>Kit fee</div>
+              <div className="comp-hint">Module + technology + uniform &mdash; batch default: {formatINR(batch.kit_fee)}</div>
+            </div>
+            <input className="money-input" type="number" value={kitOverride ?? batch.kit_fee} onChange={(e) => setKitOverride(e.target.value === "" ? null : parseFloat(e.target.value))} />
+            <button className="reset-btn" disabled={kitOverride == null} onClick={() => setKitOverride(null)}>
+              Reset
+            </button>
+          </div>
+
+          <div className="sum-row total">
+            <span className="sum-label strong">Gross fee</span>
+            <span className="sum-val big">{formatINR(result.grossFee)}</span>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <span className="kicker">03</span>
+            <h2 className="card-title">Scholarship &amp; GST</h2>
+          </div>
+          <div className="field-grid" style={{ marginBottom: 8 }}>
+            <div className="field">
+              <label>Scholarship % (on tuition fee)</label>
+              <input className="money-input" type="number" step={0.5} min={0} max={100} value={scholarshipPct ?? batch.default_scholarship_pct} onChange={(e) => setScholarshipPct(e.target.value === "" ? null : parseFloat(e.target.value))} />
+              <div className="comp-hint">Standard for this batch: {batch.default_scholarship_pct}%</div>
+            </div>
+            <div className="field">
+              <label>GST rate</label>
+              <input className="money-input" type="number" step={0.5} min={0} max={28} value={gstRate} onChange={(e) => setGstRate(parseFloat(e.target.value) || 0)} />
+            </div>
+          </div>
+          <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
+          <div className="sum-row">
+            <span className="sum-label">Scholarship amount</span>
+            <span className="sum-val">&minus; {formatINR(result.scholarshipAmount)}</span>
+          </div>
+          <div className="sum-row">
+            <span className="sum-label">Net payable (excl. GST)</span>
+            <span className="sum-val">{formatINR(result.netExclGst)}</span>
+          </div>
+          <div className="sum-row">
+            <span className="sum-label">GST @ {gstRate}%</span>
+            <span className="sum-val">+ {formatINR(result.gstAmount)}</span>
+          </div>
+          <div className="sum-row total">
+            <span className="sum-label strong">Net payable (incl. GST)</span>
+            <span className="sum-val big">{formatINR(result.netInclGst)}</span>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <span className="kicker">04</span>
+            <h2 className="card-title">Discount &amp; Payment Status</h2>
+          </div>
+          <div className="field-grid" style={{ marginBottom: 8 }}>
+            <div className="field">
+              <label>Additional discount</label>
+              <input className="money-input" type="number" min={0} value={additionalDiscount} onChange={(e) => setAdditionalDiscount(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className="field">
+              <label>Fees paid {mode === "edit" ? "(at admission)" : "at admission"}</label>
+              <input className="money-input" type="number" min={0} value={actualFeesPaid} onChange={(e) => setActualFeesPaid(parseFloat(e.target.value) || 0)} />
+              <div className="comp-hint">
+                {mode === "edit"
+                  ? "This is the opening amount only. Log every installment paid after admission from the Payments panel on this admission's page — it adds on top of this figure."
+                  : "Amount collected right now, if any. Once saved, log each later installment from the admission's Payments panel so the running total stays accurate."}
+              </div>
+            </div>
+          </div>
+          {mode === "edit" && initial?.payments_count > 0 && (
+            <div className="comp-hint" style={{ marginBottom: 8 }}>
+              Plus {formatINR(initial.payments_total)} already logged across {initial.payments_count} tracked
+              installment{initial.payments_count === 1 ? "" : "s"} &mdash; the figures below don't include those
+              until you save; see the Payments panel for the true running total.
+            </div>
+          )}
+          <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
+          <div className="sum-row">
+            <span className="sum-label strong">Actual fee payable</span>
+            <span className="sum-val big">{formatINR(result.actualPayable)}</span>
+          </div>
+          <div className="sum-row">
+            <span className="sum-label">Net outstanding {mode === "edit" && initial?.payments_count > 0 ? "(excl. tracked installments)" : ""}</span>
+            <span className="sum-val">{formatINR(Math.max(result.outstanding, 0))}</span>
+          </div>
+          <div className="sum-row">
+            <span className="sum-label">Billing status</span>
+            <span className={`badge ${result.billingStatus === "Paid in Full" ? "good" : result.billingStatus === "Unpaid" ? "bad" : "warn"}`}>
+              {result.billingStatus}
+            </span>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <span className="kicker">06</span>
+            <h2 className="card-title">Installment Schedule</h2>
+          </div>
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Stage</th>
+                <th style={{ textAlign: "right" }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>On registration</td>
+                <td className="amt">{formatINR(result.installments.inst0)}</td>
+              </tr>
+              <tr>
+                <td>1st &mdash; before batch commencement (40% of balance)</td>
+                <td className="amt">{formatINR(result.installments.inst1)}</td>
+              </tr>
+              <tr>
+                <td>2nd &mdash; by the 20th of month 2</td>
+                <td className="amt">{formatINR(result.installments.inst2)}</td>
+              </tr>
+              <tr>
+                <td>3rd &mdash; by the 20th of month 4</td>
+                <td className="amt">{formatINR(result.installments.inst3)}</td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Total of installments</strong>
+                </td>
+                <td className="amt">
+                  <strong>{formatINR(result.installments.total)}</strong>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
+          {savedMsg && <div className="success-text" style={{ marginTop: 12 }}>{savedMsg}</div>}
+          <button className="btn" style={{ marginTop: 16, width: "100%" }} onClick={handleSave} disabled={saving}>
+            {saving ? "Saving…" : mode === "edit" ? "Save changes" : "Save admission"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
