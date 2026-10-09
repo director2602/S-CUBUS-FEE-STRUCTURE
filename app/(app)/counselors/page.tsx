@@ -8,7 +8,7 @@ export default async function CounselorsPage() {
   const { data: counselors } = await supabase
     .from("profiles")
     .select("id, full_name, email, role, manager_id, created_at")
-    .in("role", ["counselor", "manager"])
+    .in("role", ["counselor", "manager", "accounts"])
     .order("created_at", { ascending: false });
 
   const managers = ((counselors as any[]) || [])
