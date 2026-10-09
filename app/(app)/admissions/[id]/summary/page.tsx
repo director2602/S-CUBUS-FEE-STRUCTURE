@@ -12,5 +12,10 @@ export default async function FeeSummaryPage({ params }: { params: { id: string 
 
   if (error || !admission) notFound();
 
-  return <FeeSummaryView admission={admission as any} />;
+  // Fetched via a SECURITY DEFINER function rather than a direct profiles query, because
+  // profiles RLS only lets a counselor read their own row (or a manager/owner read any) —
+  // an accounts user printing another counselor's fee summary would otherwise see no name.
+  const { data: counselorName } = await supabase.rpc("get_profile_name", { target_id: admission.counselor_id });
+
+  return <FeeSummaryView admission={admission as any} counselorName={(counselorName as string) || null} />;
 }

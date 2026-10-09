@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { formatINR } from "@/lib/fee-calc";
+import { formatINR, installmentDueDate } from "@/lib/fee-calc";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -12,7 +12,7 @@ function fmtDate(d: string | null) {
   }
 }
 
-export default function FeeSummaryView({ admission }: { admission: any }) {
+export default function FeeSummaryView({ admission, counselorName }: { admission: any; counselorName?: string | null }) {
   return (
     <>
       <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -29,8 +29,8 @@ export default function FeeSummaryView({ admission }: { admission: any }) {
         </div>
       </div>
 
-      <div className="invoice-sheet card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+      <div className="invoice-sheet card fee-summary-sheet">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <img src="/logo.png" alt="S-CUBUS" style={{ height: 56, width: "auto" }} />
             <div>
@@ -48,9 +48,9 @@ export default function FeeSummaryView({ admission }: { admission: any }) {
           </div>
         </div>
 
-        <div style={{ height: 1, background: "var(--line)", margin: "0 0 20px" }} />
+        <div style={{ height: 1, background: "var(--line)", margin: "0 0 14px" }} />
 
-        <div className="field-grid" style={{ marginBottom: 24 }}>
+        <div className="field-grid" style={{ marginBottom: 16 }}>
           <div>
             <div className="comp-hint">Student</div>
             <div style={{ fontWeight: 600 }}>{admission.student_name}</div>
@@ -82,7 +82,7 @@ export default function FeeSummaryView({ admission }: { admission: any }) {
           </div>
         </div>
 
-        <table className="data" style={{ marginBottom: 20 }}>
+        <table className="data" style={{ marginBottom: 14 }}>
           <thead>
             <tr>
               <th>Fee component</th>
@@ -171,23 +171,25 @@ export default function FeeSummaryView({ admission }: { admission: any }) {
               <td className="amt">{formatINR(admission.inst1)}</td>
             </tr>
             <tr>
-              <td>2nd &mdash; by the 20th of month 2</td>
+              <td>2nd &mdash; due {installmentDueDate(admission.admission_date, 2) || "by the 20th of month 2"}</td>
               <td className="amt">{formatINR(admission.inst2)}</td>
             </tr>
             <tr>
-              <td>3rd &mdash; by the 20th of month 4</td>
+              <td>3rd &mdash; due {installmentDueDate(admission.batch_commencement_date, 4) || "by the 20th of month 4"}</td>
               <td className="amt">{formatINR(admission.inst3)}</td>
             </tr>
           </tbody>
         </table>
 
-        <div style={{ marginTop: 24, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+        <div style={{ marginTop: 18, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
           <div className="comp-hint">
             Billing status: <strong style={{ color: "var(--ink)" }}>{admission.billing_status}</strong>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ borderTop: "1px solid var(--line)", width: 180, marginBottom: 6 }} />
-            <div className="comp-hint">Authorized signatory</div>
+            <div style={{ borderTop: "1px solid var(--line)", width: 180, marginBottom: 6, paddingTop: 4, fontSize: 13, fontWeight: 600 }}>
+              {counselorName || " "}
+            </div>
+            <div className="comp-hint">Authorized signatory (counselor)</div>
           </div>
         </div>
       </div>

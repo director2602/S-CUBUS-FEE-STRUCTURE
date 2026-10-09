@@ -11,5 +11,17 @@ export default async function InvoicePage({ params, searchParams }: { params: { 
 
   if (error || !admission) notFound();
 
-  return <InvoiceView admission={admission as any} payments={(payments as any) || []} initialPaymentId={searchParams?.payment} />;
+  // Fetched via a SECURITY DEFINER function rather than a direct profiles query, because
+  // profiles RLS only lets a counselor read their own row (or a manager/owner read any) —
+  // an accounts user printing another counselor's invoice would otherwise see no name here.
+  const { data: counselorName } = await supabase.rpc("get_profile_name", { target_id: admission.counselor_id });
+
+  return (
+    <InvoiceView
+      admission={admission as any}
+      payments={(payments as any) || []}
+      initialPaymentId={searchParams?.payment}
+      counselorName={(counselorName as string) || null}
+    />
+  );
 }

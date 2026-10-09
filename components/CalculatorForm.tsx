@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { BATCH_GROUP_ORDER, computeFees, formatINR, type Batch } from "@/lib/fee-calc";
+import { BATCH_GROUP_ORDER, computeFees, formatINR, installmentDueDate, type Batch } from "@/lib/fee-calc";
 import { cleanCustomFieldValues, type CustomFieldDef } from "@/lib/custom-fields";
 import CustomFieldInputs from "@/components/CustomFieldInputs";
 import { currentFiscalYear } from "@/lib/aop-calc";
@@ -632,11 +632,11 @@ export default function CalculatorForm({
                 <td className="amt">{formatINR(result.installments.inst1)}</td>
               </tr>
               <tr>
-                <td>2nd &mdash; by the 20th of month 2</td>
+                <td>2nd &mdash; due {installmentDueDate(student.admissionDate, 2) || "by the 20th of month 2"}</td>
                 <td className="amt">{formatINR(result.installments.inst2)}</td>
               </tr>
               <tr>
-                <td>3rd &mdash; by the 20th of month 4</td>
+                <td>3rd &mdash; due {installmentDueDate(student.batchStart, 4) || "by the 20th of month 4"}</td>
                 <td className="amt">{formatINR(result.installments.inst3)}</td>
               </tr>
               <tr>

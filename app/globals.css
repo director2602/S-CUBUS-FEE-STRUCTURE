@@ -645,6 +645,13 @@ input[type="range"] {
   font-weight: 700;
 }
 
+/* A4 with modest margins — the browser default (often ~1in / 25mm) is generous enough to
+   tip the fee summary onto a near-empty second page; this reliably keeps it on one sheet. */
+@page {
+  size: A4;
+  margin: 10mm 14mm;
+}
+
 @media print {
   .topbar,
   .no-print {
@@ -668,5 +675,25 @@ input[type="range"] {
 
   a {
     color: var(--ink) !important;
+  }
+
+  /* Compact the fee summary's own tables for print only — screen stays as-is — so the
+     whole thing (header, details, fee + installment tables, signatory) fits one A4 page. */
+  .fee-summary-sheet table.data td {
+    padding: 6px 8px 6px 0;
+    font-size: 12.5px;
+  }
+
+  .fee-summary-sheet table.data th {
+    padding: 4px 8px 4px 0;
+    font-size: 10px;
+  }
+
+  .fee-summary-sheet .card-head {
+    margin: 0 0 8px;
+  }
+
+  .fee-summary-sheet table.data tr {
+    page-break-inside: avoid;
   }
 }

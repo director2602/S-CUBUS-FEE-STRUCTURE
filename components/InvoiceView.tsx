@@ -41,11 +41,13 @@ function fmtDateSlash(d: string | null) {
 export default function InvoiceView({
   admission,
   payments,
-  initialPaymentId
+  initialPaymentId,
+  counselorName
 }: {
   admission: any;
   payments: Payment[];
   initialPaymentId?: string;
+  counselorName?: string | null;
 }) {
   // Chronological order (oldest first) so "amount already paid before this one" can be
   // worked out for any payment, not just the latest.
@@ -238,7 +240,10 @@ export default function InvoiceView({
 
           <div style={{ padding: "40px 22px 22px", textAlign: "right" }}>
             <div style={{ display: "inline-block", textAlign: "center" }}>
-              <div style={{ width: 200, borderTop: "1px solid #999", paddingTop: 6 }}>Authorized Signature</div>
+              <div style={{ width: 200, borderTop: "1px solid #999", paddingTop: 6 }}>
+                {counselorName || " "}
+                <div style={{ fontSize: 11, color: "#555" }}>Authorized Signature</div>
+              </div>
             </div>
           </div>
         </div>
