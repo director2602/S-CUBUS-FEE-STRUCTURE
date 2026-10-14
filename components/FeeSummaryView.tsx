@@ -171,7 +171,7 @@ export default function FeeSummaryView({ admission, counselorName }: { admission
               <td className="amt">{formatINR(admission.inst1)}</td>
             </tr>
             <tr>
-              <td>2nd &mdash; due {installmentDueDate(admission.admission_date, 2) || "by the 20th of month 2"}</td>
+              <td>2nd &mdash; due {installmentDueDate(admission.batch_commencement_date, 2) || "by the 20th of month 2"}</td>
               <td className="amt">{formatINR(admission.inst2)}</td>
             </tr>
             <tr>
@@ -187,7 +187,7 @@ export default function FeeSummaryView({ admission, counselorName }: { admission
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ borderTop: "1px solid var(--line)", width: 180, marginBottom: 6, paddingTop: 4, fontSize: 13, fontWeight: 600 }}>
-              {counselorName || " "}
+              {counselorName || " "}
             </div>
             <div className="comp-hint">Authorized signatory (counselor)</div>
           </div>
