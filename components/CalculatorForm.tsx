@@ -35,6 +35,13 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Mobile numbers are stored and validated as exactly 10 digits everywhere — this strips
+// anything typed/pasted that isn't a digit and caps the length at 10 as the person types,
+// so the field can never hold letters, spaces, a country code, or more/fewer than 10 digits.
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, "").slice(0, 10);
+}
+
 const emptyStudent: Student = {
   scid: "",
   name: "",
@@ -223,6 +230,14 @@ export default function CalculatorForm({
       setError("Set the admission date before saving.");
       return;
     }
+    if (student.phone1 && student.phone1.length !== 10) {
+      setError("Primary contact number must be exactly 10 digits.");
+      return;
+    }
+    if (student.phone2 && student.phone2.length !== 10) {
+      setError("Secondary contact number must be exactly 10 digits.");
+      return;
+    }
     setSaving(true);
     setError(null);
     setSavedMsg(null);
@@ -384,11 +399,23 @@ export default function CalculatorForm({
             </div>
             <div className="field">
               <label>Contact (primary)</label>
-              <input value={student.phone1} onChange={(e) => setStudent({ ...student, phone1: e.target.value })} />
+              <input
+                value={student.phone1}
+                onChange={(e) => setStudent({ ...student, phone1: digitsOnly(e.target.value) })}
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="10-digit mobile number"
+              />
             </div>
             <div className="field">
               <label>Contact (secondary)</label>
-              <input value={student.phone2} onChange={(e) => setStudent({ ...student, phone2: e.target.value })} />
+              <input
+                value={student.phone2}
+                onChange={(e) => setStudent({ ...student, phone2: digitsOnly(e.target.value) })}
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="10-digit mobile number"
+              />
             </div>
             <div className="field">
               <label>Date of admission</label>
@@ -660,7 +687,7 @@ export default function CalculatorForm({
                 <td className="amt">{formatINR(result.installments.inst1)}</td>
               </tr>
               <tr>
-                <td>2nd &mdash; due {installmentDueDate(student.admissionDate, 2) || "by the 20th of month 2"}</td>
+                <td>2nd &mdash; due {installmentDueDate(student.batchStart, 2) || "by the 20th of month 2"}</td>
                 <td className="amt">{formatINR(result.installments.inst2)}</td>
               </tr>
               <tr>
