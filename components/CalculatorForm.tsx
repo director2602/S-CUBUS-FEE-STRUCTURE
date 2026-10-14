@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { BATCH_GROUP_ORDER, computeFees, formatINR, installmentDueDate, type Batch } from "@/lib/fee-calc";
+import { BATCH_GROUP_ORDER, computeFees, formatINR, installmentDueDate, PAYMENT_MODES, type Batch } from "@/lib/fee-calc";
 import { cleanCustomFieldValues, type CustomFieldDef } from "@/lib/custom-fields";
 import CustomFieldInputs from "@/components/CustomFieldInputs";
 import { currentFiscalYear } from "@/lib/aop-calc";
@@ -420,19 +420,47 @@ export default function CalculatorForm({
           <div className="field-grid">
             <div className="field">
               <label>Registration fee mode</label>
-              <input value={notes.modeReg} onChange={(e) => setNotes({ ...notes, modeReg: e.target.value })} placeholder="e.g. UPI" />
+              <select value={notes.modeReg} onChange={(e) => setNotes({ ...notes, modeReg: e.target.value })}>
+                <option value="">Select mode</option>
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Installment 1 mode</label>
-              <input value={notes.mode1} onChange={(e) => setNotes({ ...notes, mode1: e.target.value })} placeholder="e.g. Online transfer" />
+              <select value={notes.mode1} onChange={(e) => setNotes({ ...notes, mode1: e.target.value })}>
+                <option value="">Select mode</option>
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Installment 2 mode</label>
-              <input value={notes.mode2} onChange={(e) => setNotes({ ...notes, mode2: e.target.value })} placeholder="e.g. PDC" />
+              <select value={notes.mode2} onChange={(e) => setNotes({ ...notes, mode2: e.target.value })}>
+                <option value="">Select mode</option>
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Installment 3 mode</label>
-              <input value={notes.mode3} onChange={(e) => setNotes({ ...notes, mode3: e.target.value })} />
+              <select value={notes.mode3} onChange={(e) => setNotes({ ...notes, mode3: e.target.value })}>
+                <option value="">Select mode</option>
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>PDC cheque no. 1</label>
