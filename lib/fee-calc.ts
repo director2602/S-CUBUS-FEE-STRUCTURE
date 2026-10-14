@@ -126,12 +126,12 @@ export function splitEvenly(total: number, n: number) {
   });
 }
 
-// Installment 2 and 3 due dates — always the 20th of a month counted forward from a real
-// date on the admission, never a fixed calendar date: installment 2 is due the 20th of the
-// month 2 months after the ADMISSION date's month, installment 3 the 20th of the month 4
-// months after the BATCH COMMENCEMENT date's month. E.g. admission 1 Apr + batch
-// commencement 1 Apr -> installment 2 due 20 Jun, installment 3 due 20 Aug. Returns null
-// when the anchor date isn't set yet, so callers can fall back to the generic wording.
+// Installment 2 and 3 due dates — always the 20th of a month counted forward from the
+// BATCH COMMENCEMENT date, never a fixed calendar date and never the admission date:
+// installment 2 is due the 20th of the month 2 months after batch commencement, installment
+// 3 the 20th of the month 4 months after batch commencement. E.g. batch commencement 1 Apr
+// -> installment 2 due 20 Jun, installment 3 due 20 Aug. Returns null when the anchor date
+// isn't set yet, so callers can fall back to the generic wording.
 const SHORT_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function parseYMD(dateStr: string): { y: number; m: number } | null {
