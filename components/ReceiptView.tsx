@@ -261,7 +261,7 @@ export default function ReceiptView({
 
     y = row(doc, y, "On registration", formatINR(admission.inst0));
     y = row(doc, y, "1st — before batch commencement (40%)", formatINR(admission.inst1));
-    y = row(doc, y, `2nd — due ${installmentDueDate(admission.admission_date, 2) || "by the 20th of month 2"}`, formatINR(admission.inst2));
+    y = row(doc, y, `2nd — due ${installmentDueDate(admission.batch_commencement_date, 2) || "by the 20th of month 2"}`, formatINR(admission.inst2));
     y = row(doc, y, `3rd — due ${installmentDueDate(admission.batch_commencement_date, 4) || "by the 20th of month 4"}`, formatINR(admission.inst3));
     y = row(doc, y, "Total of installments", formatINR(admission.inst0 + admission.inst1 + admission.inst2 + admission.inst3), { bold: true });
 
