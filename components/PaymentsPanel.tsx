@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { formatINR, INSTALLMENT_LABELS, type Payment } from "@/lib/fee-calc";
+import { formatINR, INSTALLMENT_LABELS, PAYMENT_MODES, type Payment } from "@/lib/fee-calc";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -192,7 +192,14 @@ export default function PaymentsPanel({
                     <input type="date" value={editDraft.paid_on} onChange={(e) => setEditDraft({ ...editDraft, paid_on: e.target.value })} />
                   </td>
                   <td>
-                    <input value={editDraft.mode} onChange={(e) => setEditDraft({ ...editDraft, mode: e.target.value })} placeholder="e.g. UPI" />
+                    <select value={editDraft.mode} onChange={(e) => setEditDraft({ ...editDraft, mode: e.target.value })}>
+                      <option value="">Select mode</option>
+                      {PAYMENT_MODES.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
@@ -268,7 +275,14 @@ export default function PaymentsPanel({
         </div>
         <div className="field">
           <label>Mode</label>
-          <input value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value })} placeholder="e.g. UPI, cheque, cash" />
+          <select value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value })}>
+            <option value="">Select mode</option>
+            {PAYMENT_MODES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="field full">
           <label>Note (optional)</label>
