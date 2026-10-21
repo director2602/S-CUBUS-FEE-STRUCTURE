@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { jsPDF } from "jspdf";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { formatINR, installmentDueDate, type Payment } from "@/lib/fee-calc";
+import { calculateProRataRefund, formatINR, installmentDueDate, type Payment } from "@/lib/fee-calc";
 import SignaturePad, { type SignaturePadHandle } from "@/components/SignaturePad";
 import PaymentsPanel from "@/components/PaymentsPanel";
 import { setRefundStatus } from "@/app/actions/admissions";
@@ -18,7 +18,15 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function RefundControl({ admission, canManageRefund }: { admission: any; canManageRefund: boolean }) {
+function RefundControl({
+  admission,
+  canManageRefund,
+  courseDurationMonths
+}: {
+  admission: any;
+  canManageRefund: boolean;
+  courseDurationMonths: number | null;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(todayISO());
@@ -26,6 +34,24 @@ function RefundControl({ admission, canManageRefund }: { admission: any; canMana
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Suggested refund per the pro-rata policy — registration fee, kit fee, and GST are never
+  // refundable, and the rest is prorated by how much of the batch's course is still unused
+  // as of the chosen refund date. Recomputed live as the refund date changes; shown as a
+  // suggestion only — the amount field stays manually editable, defaulting to total paid.
+  const suggestion = calculateProRataRefund({
+    totalFeePaid: admission.total_paid,
+    registrationFee: admission.reg_fee,
+    kitFee: admission.kit_fee,
+    gstAmount: admission.gst_amount,
+    totalServiceMonths: courseDurationMonths,
+    batchCommencementDate: admission.batch_commencement_date,
+    refundDate: date
+  });
+
+  function useSuggestedAmount() {
+    setAmount(String(suggestion.refundAmount));
+  }
 
   async function confirmRefund() {
     setBusy(true);
@@ -108,6 +134,21 @@ function RefundControl({ admission, canManageRefund }: { admission: any; canMana
             <input className="money-input" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} />
           </div>
           <div className="field full">
+            {suggestion.flagged ? (
+              <div className="comp-hint">Pro-rata suggestion unavailable: {suggestion.flagReason}</div>
+            ) : (
+              <div className="comp-hint" style={{ lineHeight: 1.6 }}>
+                Pro-rata suggestion (registration fee, kit fee &amp; GST excluded as non-refundable):{" "}
+                <strong style={{ color: "var(--ink)" }}>{formatINR(suggestion.refundAmount)}</strong>{" "}
+                &mdash; {formatINR(suggestion.refundableBase)} refundable base &times;{" "}
+                {suggestion.unusedMonths.toFixed(1)} of {(suggestion.usedMonths + suggestion.unusedMonths).toFixed(1)} unused months.{" "}
+                <button type="button" className="reset-btn" style={{ display: "inline", padding: 0 }} onClick={useSuggestedAmount}>
+                  Use this amount
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="field full">
             <label>Note (optional)</label>
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. reason for discontinuing" />
           </div>
@@ -130,12 +171,14 @@ export default function ReceiptView({
   admission,
   payments = [],
   fieldDefs = [],
-  canManageRefund = false
+  canManageRefund = false,
+  courseDurationMonths = null
 }: {
   admission: any;
   payments?: Payment[];
   fieldDefs?: CustomFieldDef[];
   canManageRefund?: boolean;
+  courseDurationMonths?: number | null;
 }) {
   const customEntries = fieldDefs
     .map((f) => ({ def: f, value: admission.custom_fields?.[f.field_key] }))
@@ -358,7 +401,7 @@ export default function ReceiptView({
       <div style={{ height: 16 }} />
       {(admission.status === "refunded" || canManageRefund) && (
         <>
-          <RefundControl admission={admission} canManageRefund={canManageRefund} />
+          <RefundControl admission={admission} canManageRefund={canManageRefund} courseDurationMonths={courseDurationMonths} />
           <div style={{ height: 16 }} />
         </>
       )}
