@@ -29,6 +29,7 @@ const blankRow = (sortOrder: number): Row => ({
   sort_order: sortOrder,
   active: true,
   custom_fields: {},
+  course_duration_months: null,
   _isNew: true,
   _dirty: true
 });
@@ -117,6 +118,7 @@ export default function FeeStructureEditor({ initialBatches, fieldDefs = [] }: {
               <th style={{ textAlign: "right" }}>Tuition</th>
               <th style={{ textAlign: "right" }}>Kit fee</th>
               <th style={{ textAlign: "right" }}>Scholarship %</th>
+              <th style={{ textAlign: "right", minWidth: 110 }}>Course duration (months)</th>
               <th style={{ textAlign: "right" }}>Gross</th>
               {fieldDefs.map((f) => (
                 <th key={f.id} style={{ minWidth: 130 }}>{f.label}</th>
@@ -152,6 +154,18 @@ export default function FeeStructureEditor({ initialBatches, fieldDefs = [] }: {
                 </td>
                 <td>
                   <input className="money-input" type="number" min={0} max={100} step={0.5} value={r.default_scholarship_pct} onChange={(e) => updateRow(idx, { default_scholarship_pct: parseFloat(e.target.value) || 0 })} style={{ textAlign: "right" }} />
+                </td>
+                <td>
+                  <input
+                    className="money-input"
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={r.course_duration_months ?? ""}
+                    onChange={(e) => updateRow(idx, { course_duration_months: e.target.value === "" ? null : parseFloat(e.target.value) || 0 })}
+                    placeholder="e.g. 12"
+                    style={{ textAlign: "right" }}
+                  />
                 </td>
                 <td className="amt">{formatINR(r.reg_fee + r.tuition_fee + r.kit_fee)}</td>
                 {fieldDefs.map((f) => (
@@ -192,7 +206,11 @@ export default function FeeStructureEditor({ initialBatches, fieldDefs = [] }: {
         <button className="btn" onClick={handleSaveAll} disabled={saving || dirtyCount === 0}>
           {saving ? "Saving…" : dirtyCount > 0 ? `Save & finalize ${dirtyCount} change${dirtyCount === 1 ? "" : "s"}` : "No changes to save"}
         </button>
-        <span className="comp-hint">Unchecking "Active" retires a batch from the dropdown without deleting its history.</span>
+        <span className="comp-hint">
+          Unchecking "Active" retires a batch from the dropdown without deleting its history. Course duration drives
+          the pro-rata refund suggestion on an admission &mdash; leave it blank to require manual refund entry for
+          that batch.
+        </span>
       </div>
     </div>
   );
