@@ -12,6 +12,10 @@ export type Batch = {
   sort_order: number;
   active: boolean;
   custom_fields?: Record<string, string | number>;
+  // Total length of this batch's course, in months — the denominator for a pro-rata refund
+  // (see calculateProRataRefund below). Left unset on a batch, refunds for its admissions
+  // fall back to manual entry instead of guessing a duration.
+  course_duration_months?: number | null;
 };
 
 export type FeeInputs = {
@@ -241,4 +245,105 @@ export function numberToWordsIndian(n: number): string {
 
 export function amountInWordsINR(n: number) {
   return `Indian Rupee ${numberToWordsIndian(n)} Only`;
+}
+
+// ---- Pro-rata refund calculation ----
+//
+// Business rule (as specified): when a student discontinues, the refund is calculated on
+// the fee actually collected, minus whatever is never refundable, prorated by how much of
+// the course is still unused:
+//
+//   Refundable Base   = Total Fee Paid − Registration Fee − Kit Fee − Non-Refundable GST
+//   Pro-Rata Refund    = Refundable Base × (Unused Service Period ÷ Total Service Period)
+//
+// Registration fee, kit fee (once issued), and GST are never part of the refundable base —
+// they're deducted in full regardless of how early the student discontinues. "Service
+// period" is counted in months from the batch's commencement date (not the admission date)
+// to the refund date, against the batch's total course duration.
+//
+// If any required figure or date is missing, or the batch has no course duration configured,
+// this returns `flagged: true` instead of guessing — the caller should fall back to manual
+// entry rather than show a number that might be wrong.
+function parseYMDFull(dateStr: string): { y: number; m: number; d: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+  if (!match) return null;
+  return { y: parseInt(match[1], 10), m: parseInt(match[2], 10), d: parseInt(match[3], 10) };
+}
+
+function daysInMonth(y: number, m: number): number {
+  // m is 1-based; day 0 of the following month is the last day of month m.
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+// Calendar months between two dates, with the leftover days expressed as a fraction of the
+// TARGET month's length — e.g. 1 Jan to 1 May is exactly 4.0 months, and 15 Jan to 1 Feb is
+// 0.5 months. This is what makes "4 months used of a 12-month course" land on a whole number
+// when the anchor and refund dates share the same day-of-month, matching how the business
+// rule's own worked example is stated.
+function monthsBetween(fromDateStr: string, toDateStr: string): number | null {
+  const from = parseYMDFull(fromDateStr);
+  const to = parseYMDFull(toDateStr);
+  if (!from || !to) return null;
+  const wholeMonths = to.y * 12 + to.m - (from.y * 12 + from.m);
+  const dayFraction = (to.d - from.d) / daysInMonth(to.y, to.m);
+  return wholeMonths + dayFraction;
+}
+
+export type ProRataRefundInput = {
+  totalFeePaid: number | null | undefined;
+  registrationFee: number | null | undefined;
+  kitFee: number | null | undefined;
+  gstAmount: number | null | undefined;
+  totalServiceMonths: number | null | undefined; // from the batch's course_duration_months
+  batchCommencementDate: string | null | undefined; // "service" starts here, not admission date
+  refundDate: string | null | undefined;
+};
+
+export type ProRataRefundResult = {
+  refundableBase: number;
+  usedMonths: number;
+  unusedMonths: number;
+  refundAmount: number;
+  flagged: boolean;
+  flagReason: string | null;
+};
+
+function flaggedResult(reason: string): ProRataRefundResult {
+  return { refundableBase: 0, usedMonths: 0, unusedMonths: 0, refundAmount: 0, flagged: true, flagReason: reason };
+}
+
+export function calculateProRataRefund(input: ProRataRefundInput): ProRataRefundResult {
+  const { totalFeePaid, registrationFee, kitFee, gstAmount, totalServiceMonths, batchCommencementDate, refundDate } = input;
+
+  if (
+    totalFeePaid == null || Number.isNaN(totalFeePaid) ||
+    registrationFee == null || Number.isNaN(registrationFee) ||
+    kitFee == null || Number.isNaN(kitFee) ||
+    gstAmount == null || Number.isNaN(gstAmount)
+  ) {
+    return flaggedResult("Fee details are missing or invalid — calculate the refund manually.");
+  }
+  if (!batchCommencementDate || !refundDate) {
+    return flaggedResult("Batch commencement date or refund date is missing — calculate the refund manually.");
+  }
+  if (totalServiceMonths == null || Number.isNaN(totalServiceMonths) || totalServiceMonths <= 0) {
+    return flaggedResult("This batch has no course duration configured (set it in Fee Structure) — calculate the refund manually.");
+  }
+
+  const elapsed = monthsBetween(batchCommencementDate, refundDate);
+  if (elapsed == null) {
+    return flaggedResult("Batch commencement date or refund date is invalid — calculate the refund manually.");
+  }
+
+  const refundableBase = Math.max(0, round2(totalFeePaid - registrationFee - kitFee - gstAmount));
+  const usedMonths = Math.min(Math.max(elapsed, 0), totalServiceMonths);
+  const unusedMonths = Math.max(0, totalServiceMonths - usedMonths);
+
+  if (unusedMonths <= 0) {
+    return { refundableBase, usedMonths, unusedMonths: 0, refundAmount: 0, flagged: false, flagReason: null };
+  }
+
+  const refundAmount = Math.min(refundableBase, Math.max(0, round2(refundableBase * (unusedMonths / totalServiceMonths))));
+
+  return { refundableBase, usedMonths, unusedMonths, refundAmount, flagged: false, flagReason: null };
 }
