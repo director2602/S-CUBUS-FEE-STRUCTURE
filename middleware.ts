@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const OWNER_ONLY_PREFIXES = ["/dashboard", "/counselors", "/fee-structure", "/annual-plan", "/custom-fields"];
+const OWNER_ONLY_PREFIXES = ["/dashboard", "/counselors", "/fee-structure", "/annual-plan", "/custom-fields", "/export"];
 const MANAGER_OR_OWNER_PREFIXES = ["/team"];
 
 export async function middleware(request: NextRequest) {
