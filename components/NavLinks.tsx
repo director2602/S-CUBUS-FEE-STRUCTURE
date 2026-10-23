@@ -18,7 +18,8 @@ export default function NavLinks({ role }: { role: string }) {
           { href: "/org", label: "Team & Hierarchy" },
           { href: "/fee-structure", label: "Fee Structure" },
           { href: "/counselors", label: "Counselors" },
-          { href: "/custom-fields", label: "Manage Fields" }
+          { href: "/custom-fields", label: "Manage Fields" },
+          { href: "/export", label: "Export Data" }
         ]
       : [])
   ];
