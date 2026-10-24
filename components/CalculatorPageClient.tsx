@@ -12,7 +12,8 @@ export default function CalculatorPageClient({
   isOwner,
   allAdmissions,
   fieldDefs = [],
-  canEditFees = true
+  canEditFees = true,
+  role
 }: {
   batches: Batch[];
   counselorId: string;
@@ -20,6 +21,7 @@ export default function CalculatorPageClient({
   allAdmissions?: boolean;
   fieldDefs?: CustomFieldDef[];
   canEditFees?: boolean;
+  role?: string;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -37,7 +39,7 @@ export default function CalculatorPageClient({
         canEditFees={canEditFees}
       />
       <div style={{ height: 32 }} />
-      <AdmissionsList isOwner={isOwner} allAdmissions={allAdmissions} reloadToken={reloadToken} />
+      <AdmissionsList isOwner={isOwner} allAdmissions={allAdmissions} reloadToken={reloadToken} role={role} />
     </>
   );
 }
