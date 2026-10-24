@@ -19,7 +19,8 @@ type Row = {
 };
 
 const BASE_COLS = "id, scid, student_name, batch_label, created_at, pdf_path";
-const FINANCIAL_COLS = "actual_payable, total_paid, outstanding, billing_status";
+const AMOUNT_COLS = "actual_payable, total_paid, outstanding";
+const STATUS_COL = "billing_status";
 
 export default function AdmissionsList({
   isOwner,
@@ -35,8 +36,11 @@ export default function AdmissionsList({
   role?: string;
 }) {
   const supabase = supabaseBrowser();
-  const canSeeFinancials = role !== "counselor";
-  const SELECT_COLS = canSeeFinancials ? `${BASE_COLS}, ${FINANCIAL_COLS}` : BASE_COLS;
+  // Payable/Outstanding stay owner & accounts only — managers see their team's roster and
+  // billing status, but not the rupee figures; counselors see neither figures nor status.
+  const canSeeAmounts = role === "owner" || role === "accounts";
+  const canSeeStatus = role !== "counselor";
+  const SELECT_COLS = [BASE_COLS, canSeeAmounts && AMOUNT_COLS, canSeeStatus && STATUS_COL].filter(Boolean).join(", ");
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -139,13 +143,13 @@ export default function AdmissionsList({
                 <th>Student</th>
                 <th>SCID</th>
                 <th>Batch</th>
-                {canSeeFinancials && (
+                {canSeeAmounts && (
                   <>
                     <th style={{ textAlign: "right" }}>Payable</th>
                     <th style={{ textAlign: "right" }}>Outstanding</th>
-                    <th>Status</th>
                   </>
                 )}
+                {canSeeStatus && <th>Status</th>}
                 <th>Actions</th>
               </tr>
             </thead>
@@ -155,18 +159,20 @@ export default function AdmissionsList({
                   <td>{r.student_name}</td>
                   <td>{r.scid || "—"}</td>
                   <td>{r.batch_label}</td>
-                  {canSeeFinancials && (
+                  {canSeeAmounts && (
                     <>
                       <td className="amt">{formatINR(r.actual_payable || 0)}</td>
                       <td className="amt">{formatINR(r.outstanding || 0)}</td>
-                      <td>
-                        <span
-                          className={`badge ${r.billing_status === "Paid in Full" ? "good" : r.billing_status === "Unpaid" ? "bad" : "warn"}`}
-                        >
-                          {r.billing_status}
-                        </span>
-                      </td>
                     </>
+                  )}
+                  {canSeeStatus && (
+                    <td>
+                      <span
+                        className={`badge ${r.billing_status === "Paid in Full" ? "good" : r.billing_status === "Unpaid" ? "bad" : "warn"}`}
+                      >
+                        {r.billing_status}
+                      </span>
+                    </td>
                   )}
                   <td>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
