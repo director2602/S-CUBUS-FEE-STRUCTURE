@@ -10,26 +10,33 @@ type Row = {
   scid: string | null;
   student_name: string;
   batch_label: string;
-  actual_payable: number;
-  total_paid: number;
-  outstanding: number;
-  billing_status: "Paid in Full" | "Unpaid" | "Partially Paid";
+  actual_payable?: number;
+  total_paid?: number;
+  outstanding?: number;
+  billing_status?: "Paid in Full" | "Unpaid" | "Partially Paid";
   created_at: string;
   pdf_path: string | null;
 };
 
-const SELECT_COLS = "id, scid, student_name, batch_label, actual_payable, total_paid, outstanding, billing_status, created_at, pdf_path";
+const BASE_COLS = "id, scid, student_name, batch_label, created_at, pdf_path";
+const FINANCIAL_COLS = "actual_payable, total_paid, outstanding, billing_status";
 
 export default function AdmissionsList({
   isOwner,
   allAdmissions,
-  reloadToken
+  reloadToken,
+  role
 }: {
   isOwner: boolean;
   allAdmissions?: boolean;
   reloadToken: number;
+  // Counselors see a directory only — fee/payment figures stay on the individual
+  // student's own page (calculator edit / payments screen), not in this shared list.
+  role?: string;
 }) {
   const supabase = supabaseBrowser();
+  const canSeeFinancials = role !== "counselor";
+  const SELECT_COLS = canSeeFinancials ? `${BASE_COLS}, ${FINANCIAL_COLS}` : BASE_COLS;
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -51,7 +58,7 @@ export default function AdmissionsList({
             .order("created_at", { ascending: false })
             .limit(50);
           if (!cancelled) {
-            setRows((data as Row[]) || []);
+            setRows((data as unknown as Row[]) || []);
             setLoading(false);
           }
           return;
@@ -67,7 +74,7 @@ export default function AdmissionsList({
         ]);
         if (cancelled) return;
         const merged = new Map<string, Row>();
-        [...((byName.data as Row[]) || []), ...((byScid.data as Row[]) || [])].forEach((r) => merged.set(r.id, r));
+        [...((byName.data as unknown as Row[]) || []), ...((byScid.data as unknown as Row[]) || [])].forEach((r) => merged.set(r.id, r));
         setRows([...merged.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)));
         setLoading(false);
       },
@@ -132,9 +139,13 @@ export default function AdmissionsList({
                 <th>Student</th>
                 <th>SCID</th>
                 <th>Batch</th>
-                <th style={{ textAlign: "right" }}>Payable</th>
-                <th style={{ textAlign: "right" }}>Outstanding</th>
-                <th>Status</th>
+                {canSeeFinancials && (
+                  <>
+                    <th style={{ textAlign: "right" }}>Payable</th>
+                    <th style={{ textAlign: "right" }}>Outstanding</th>
+                    <th>Status</th>
+                  </>
+                )}
                 <th>Actions</th>
               </tr>
             </thead>
@@ -144,15 +155,19 @@ export default function AdmissionsList({
                   <td>{r.student_name}</td>
                   <td>{r.scid || "—"}</td>
                   <td>{r.batch_label}</td>
-                  <td className="amt">{formatINR(r.actual_payable)}</td>
-                  <td className="amt">{formatINR(r.outstanding)}</td>
-                  <td>
-                    <span
-                      className={`badge ${r.billing_status === "Paid in Full" ? "good" : r.billing_status === "Unpaid" ? "bad" : "warn"}`}
-                    >
-                      {r.billing_status}
-                    </span>
-                  </td>
+                  {canSeeFinancials && (
+                    <>
+                      <td className="amt">{formatINR(r.actual_payable || 0)}</td>
+                      <td className="amt">{formatINR(r.outstanding || 0)}</td>
+                      <td>
+                        <span
+                          className={`badge ${r.billing_status === "Paid in Full" ? "good" : r.billing_status === "Unpaid" ? "bad" : "warn"}`}
+                        >
+                          {r.billing_status}
+                        </span>
+                      </td>
+                    </>
+                  )}
                   <td>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <Link className="btn small" href={`/admissions/${r.id}#payments`}>
