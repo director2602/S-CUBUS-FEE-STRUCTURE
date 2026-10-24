@@ -61,18 +61,26 @@ export default async function TeamPage() {
     data: { user }
   } = await supabase.auth.getUser();
 
-  const [{ data: viewerProfile }, { data: rows }, { data: profiles }] = await Promise.all([
-    supabase.from("profiles").select("role").eq("id", user!.id).single(),
+  const { data: viewerProfile } = await supabase.from("profiles").select("role").eq("id", user!.id).single();
+  const isOwner = viewerProfile?.role === "owner";
+
+  // Owner sees the whole roster; a manager sees only the counselors who report to them —
+  // never another manager's team or the company-wide picture.
+  let peopleQuery = supabase.from("profiles").select("id, full_name, email, role").in("role", ["counselor", "manager"]);
+  if (!isOwner) {
+    peopleQuery = peopleQuery.eq("manager_id", user!.id);
+  }
+
+  const [{ data: rows }, { data: profiles }] = await Promise.all([
     supabase
       .from("admissions_computed")
       .select(
         "id, scid, student_name, admission_date, batch_label, eff_scholarship_pct, scholarship_amount, additional_discount, counselor_id, actual_payable, total_paid, outstanding, created_at, updated_at, last_payment_on"
       )
       .eq("status", "active"),
-    supabase.from("profiles").select("id, full_name, email, role").in("role", ["counselor", "manager"])
+    peopleQuery
   ]);
 
-  const isOwner = viewerProfile?.role === "owner";
   const data = (rows as Row[]) || [];
   const people = (profiles as { id: string; full_name: string | null; email: string; role: string }[]) || [];
 
