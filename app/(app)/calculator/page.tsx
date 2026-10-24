@@ -34,6 +34,7 @@ export default async function CalculatorPage() {
       allAdmissions={profile?.role === "owner" || profile?.role === "manager" || profile?.role === "accounts"}
       fieldDefs={fieldDefs}
       canEditFees={profile?.role !== "counselor"}
+      role={profile?.role || "counselor"}
     />
   );
 }
