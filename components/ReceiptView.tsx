@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { jsPDF } from "jspdf";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { calculateProRataRefund, formatINR, installmentDueDate, type Payment } from "@/lib/fee-calc";
+import { calculateRefundSuggestion, formatINR, installmentDueDate, type Payment } from "@/lib/fee-calc";
 import SignaturePad, { type SignaturePadHandle } from "@/components/SignaturePad";
 import PaymentsPanel from "@/components/PaymentsPanel";
 import { setRefundStatus } from "@/app/actions/admissions";
@@ -21,11 +21,13 @@ function todayISO() {
 function RefundControl({
   admission,
   canManageRefund,
-  courseDurationMonths
+  courseDurationMonths,
+  payments
 }: {
   admission: any;
   canManageRefund: boolean;
   courseDurationMonths: number | null;
+  payments: Payment[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -35,17 +37,29 @@ function RefundControl({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Suggested refund per the pro-rata policy — registration fee, kit fee, and GST are never
-  // refundable, and the rest is prorated by how much of the batch's course is still unused
-  // as of the chosen refund date. Recomputed live as the refund date changes; shown as a
-  // suggestion only — the amount field stays manually editable, defaulting to total paid.
-  const suggestion = calculateProRataRefund({
-    totalFeePaid: admission.total_paid,
-    registrationFee: admission.reg_fee,
-    kitFee: admission.kit_fee,
-    gstAmount: admission.gst_amount,
-    totalServiceMonths: courseDurationMonths,
+  // What's been paid so far excluding Registration — but this is still a BLENDED figure.
+  // Installment 1/2/3 payments each cover tuition, kit fee and GST together (they're a split
+  // of actual_payable as a whole, not billed as separate line items), so this number alone
+  // isn't "tuition paid" yet — calculateRefundSuggestion below backs the kit-fee/GST share out.
+  const tuitionPaidSoFar = payments
+    .filter((p) => p.installment_label !== "Registration")
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  // Suggested refund per the company's written refund policy — registration fee, kit fee
+  // (which also covers technology/LMS and exam fees) and GST are never refundable, even though
+  // they arrive bundled inside the same installment payment as tuition does. The tuition-only
+  // share of what's been paid is refunded at a fixed percentage by week since the refund clock
+  // started (the later of batch commencement or admission date), per the official schedule.
+  // Recomputed live as the refund date changes; shown as a suggestion only — the amount
+  // field stays manually editable, defaulting to total paid.
+  const suggestion = calculateRefundSuggestion({
+    tuitionPaidSoFar,
+    tuitionFee: admission.tuition_fee,
+    effScholarshipPct: admission.eff_scholarship_pct,
+    regFee: admission.reg_fee,
+    actualPayable: admission.actual_payable,
     batchCommencementDate: admission.batch_commencement_date,
+    admissionDate: admission.admission_date,
     refundDate: date
   });
 
@@ -135,16 +149,22 @@ function RefundControl({
           </div>
           <div className="field full">
             {suggestion.flagged ? (
-              <div className="comp-hint">Pro-rata suggestion unavailable: {suggestion.flagReason}</div>
+              <div className="comp-hint">Refund suggestion unavailable: {suggestion.flagReason}</div>
             ) : (
-              <div className="comp-hint" style={{ lineHeight: 1.6 }}>
-                Pro-rata suggestion (registration fee, kit fee &amp; GST excluded as non-refundable):{" "}
-                <strong style={{ color: "var(--ink)" }}>{formatINR(suggestion.refundAmount)}</strong>{" "}
-                &mdash; {formatINR(suggestion.refundableBase)} refundable base &times;{" "}
-                {suggestion.unusedMonths.toFixed(1)} of {(suggestion.usedMonths + suggestion.unusedMonths).toFixed(1)} unused months.{" "}
-                <button type="button" className="reset-btn" style={{ display: "inline", padding: 0 }} onClick={useSuggestedAmount}>
-                  Use this amount
-                </button>
+              <div className="comp-hint" style={{ lineHeight: 1.7 }}>
+                <div>
+                  {formatINR(suggestion.tuitionPaidSoFar)} paid so far (excl. registration) &mdash; of which{" "}
+                  <strong style={{ color: "var(--ink)" }}>{formatINR(suggestion.refundableBase)}</strong> is tuition
+                  (&asymp;{Math.round(suggestion.tuitionShareRatio * 100)}%; the rest is non-refundable kit fee, tech/exam fee &amp; GST).
+                </div>
+                <div>
+                  {suggestion.tier} &mdash; <strong style={{ color: "var(--ink)" }}>{suggestion.refundPct}%</strong> of that tuition portion
+                  refundable: <strong style={{ color: "var(--ink)" }}>{formatINR(suggestion.refundAmount)}</strong>{" "}
+                  &mdash; {formatINR(suggestion.refundableBase)} tuition &times; {suggestion.refundPct}%.{" "}
+                  <button type="button" className="reset-btn" style={{ display: "inline", padding: 0 }} onClick={useSuggestedAmount}>
+                    Use this amount
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -401,7 +421,7 @@ export default function ReceiptView({
       <div style={{ height: 16 }} />
       {(admission.status === "refunded" || canManageRefund) && (
         <>
-          <RefundControl admission={admission} canManageRefund={canManageRefund} courseDurationMonths={courseDurationMonths} />
+          <RefundControl admission={admission} canManageRefund={canManageRefund} courseDurationMonths={courseDurationMonths} payments={payments} />
           <div style={{ height: 16 }} />
         </>
       )}
