@@ -13,6 +13,7 @@ export default function NavLinks({ role }: { role: string }) {
     ...(isOwner
       ? [
           { href: "/dashboard", label: "Dashboard" },
+          { href: "/sales-register", label: "Sales Register" },
           { href: "/annual-plan", label: "Annual Plan" },
           { href: "/aop", label: "AOP" },
           { href: "/org", label: "Team & Hierarchy" },
