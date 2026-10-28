@@ -6,6 +6,8 @@ import {
   formatINR,
   formatINR2,
   HSN_SAC_CODE,
+  CARD_CHARGE_SAC_CODE,
+  CARD_CHARGE_RATE,
   installmentInvoiceDescription,
   amountInWordsINR,
   round2,
@@ -76,6 +78,9 @@ export default function InvoiceView({
     );
   }
 
+  // Outstanding against the admission's fee is driven by `amount` only — a card/POS
+  // convenience charge is a pass-through the student pays on top, never a fee payment, so it
+  // never enters this balance.
   const paidBefore = admission.actual_fees_paid + sorted.slice(0, idx).reduce((s, p) => s + Number(p.amount), 0);
   const outstandingAfter = Math.max(0, round2(admission.actual_payable - (paidBefore + Number(selected.amount))));
 
@@ -84,6 +89,14 @@ export default function InvoiceView({
   const halfRate = round2(gstRate / 2);
   const taxableValue = gstRate > 0 ? amount / (1 + gstRate / 100) : amount;
   const halfTax = round2(taxableValue * (halfRate / 100));
+
+  // Card/POS convenience charge — stored tax-inclusive, same as `amount`, so it's backed out
+  // the same way for its own CGST/SGST split on the invoice.
+  const cardCharge = Number((selected as any).card_charge_amount || 0);
+  const hasCardCharge = cardCharge > 0;
+  const cardTaxableValue = gstRate > 0 ? cardCharge / (1 + gstRate / 100) : cardCharge;
+  const cardHalfTax = round2(cardTaxableValue * (halfRate / 100));
+  const grandTotal = round2(amount + cardCharge);
 
   const invoiceNo = selected.invoice_no || "—";
   const dateStr = fmtDateSlash(selected.paid_on);
@@ -195,17 +208,48 @@ export default function InvoiceView({
                 <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? formatINR2(halfTax) : "—"}</td>
                 <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top", fontWeight: 600 }}>{formatINR2(amount)}</td>
               </tr>
+              {hasCardCharge && (
+                <tr>
+                  <td style={{ border: "1px solid #999", padding: "8px", verticalAlign: "top" }}>2</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", verticalAlign: "top" }}>
+                    <div style={{ fontWeight: 700 }}>Card / POS Convenience Charge</div>
+                    <div style={{ color: "#555" }}>{CARD_CHARGE_RATE}% on this installment, paid via {selected.mode || "card"}</div>
+                  </td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{CARD_CHARGE_SAC_CODE}</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>1.00</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{formatINR2(cardCharge)}</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? `${halfRate}%` : "—"}</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? formatINR2(cardHalfTax) : "—"}</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? `${halfRate}%` : "—"}</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? formatINR2(cardHalfTax) : "—"}</td>
+                  <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top", fontWeight: 600 }}>{formatINR2(cardCharge)}</td>
+                </tr>
+              )}
             </tbody>
           </table>
+
+          {hasCardCharge && (
+            <div style={{ fontSize: 10.5, color: "#777", padding: "4px 22px" }}>
+              SAC {CARD_CHARGE_SAC_CODE} (financial transaction processing / card charge) &mdash; confirm with your
+              CA before relying on this code for a GST filing.
+            </div>
+          )}
 
           <div style={{ display: "flex" }}>
             <div style={{ flex: 1.3, padding: "14px 22px", borderRight: "1px solid #999" }}>
               <div style={{ fontWeight: 700 }}>Total In Words</div>
-              <div style={{ fontStyle: "italic", fontWeight: 700, marginBottom: 14 }}>{amountInWordsINR(amount)}</div>
+              <div style={{ fontStyle: "italic", fontWeight: 700, marginBottom: 14 }}>{amountInWordsINR(grandTotal)}</div>
 
               <div style={{ fontWeight: 700 }}>Notes</div>
               <div>
-                Remaining net outstanding amount: {formatINR(outstandingAfter)} only.
+                {hasCardCharge && (
+                  <>
+                    Includes {formatINR(cardCharge)} card/POS convenience charge ({CARD_CHARGE_RATE}% + GST) &mdash;
+                    only {formatINR(amount)} of this counts toward the fee due.
+                    <br />
+                  </>
+                )}
+                Remaining net outstanding amount{hasCardCharge ? " (fee only)" : ""}: {formatINR(outstandingAfter)} only.
                 <br />
                 Thanks for your business.
               </div>
@@ -216,7 +260,7 @@ export default function InvoiceView({
             <div style={{ flex: 1, padding: "14px 22px" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", rowGap: 6 }}>
                 <div style={{ textAlign: "right" }}>
-                  Sub Total
+                  {hasCardCharge ? "Fee Sub Total" : "Sub Total"}
                   <div style={{ fontSize: 11, color: "#666" }}>(Tax Inclusive)</div>
                 </div>
                 <div style={{ textAlign: "right" }}>{formatINR2(amount)}</div>
@@ -228,10 +272,27 @@ export default function InvoiceView({
                     <div style={{ textAlign: "right" }}>{formatINR2(halfTax)}</div>
                   </>
                 )}
+                {hasCardCharge && (
+                  <>
+                    <div style={{ textAlign: "right", fontWeight: 700, paddingTop: 6 }}>
+                      + Card Charge
+                      <div style={{ fontSize: 11, color: "#666", fontWeight: 400 }}>({CARD_CHARGE_RATE}% + GST)</div>
+                    </div>
+                    <div style={{ textAlign: "right", fontWeight: 700, paddingTop: 6 }}>{formatINR2(cardCharge)}</div>
+                    {gstRate > 0 && (
+                      <>
+                        <div style={{ textAlign: "right" }}>CGST{halfRate} ({halfRate}%)</div>
+                        <div style={{ textAlign: "right" }}>{formatINR2(cardHalfTax)}</div>
+                        <div style={{ textAlign: "right" }}>SGST{halfRate} ({halfRate}%)</div>
+                        <div style={{ textAlign: "right" }}>{formatINR2(cardHalfTax)}</div>
+                      </>
+                    )}
+                  </>
+                )}
                 <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #999", paddingTop: 6 }}>Total</div>
-                <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #999", paddingTop: 6 }}>&#8377;{formatINR2(amount)}</div>
+                <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #999", paddingTop: 6 }}>&#8377;{formatINR2(grandTotal)}</div>
                 <div style={{ textAlign: "right" }}>Payment Made</div>
-                <div style={{ textAlign: "right", color: "#c0392b" }}>(-) {formatINR2(amount)}</div>
+                <div style={{ textAlign: "right", color: "#c0392b" }}>(-) {formatINR2(grandTotal)}</div>
                 <div style={{ textAlign: "right", fontWeight: 700 }}>Balance Due</div>
                 <div style={{ textAlign: "right", fontWeight: 700 }}>&#8377;0.00</div>
               </div>
@@ -241,7 +302,7 @@ export default function InvoiceView({
           <div style={{ padding: "40px 22px 22px", textAlign: "right" }}>
             <div style={{ display: "inline-block", textAlign: "center" }}>
               <div style={{ width: 200, borderTop: "1px solid #999", paddingTop: 6 }}>
-                {counselorName || " "}
+                {counselorName || " "}
                 <div style={{ fontSize: 11, color: "#555" }}>Authorized Signature</div>
               </div>
             </div>
