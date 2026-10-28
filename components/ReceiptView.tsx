@@ -491,6 +491,7 @@ export default function ReceiptView({
               counselorId={admission.counselor_id}
               initialPayments={payments}
               baseAmount={admission.actual_fees_paid}
+              gstRate={admission.gst_rate}
               onChanged={() => router.refresh()}
             />
           </div>
