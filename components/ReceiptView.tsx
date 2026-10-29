@@ -38,10 +38,21 @@ function RefundControl({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // What's been paid so far excluding Registration — but this is still a BLENDED figure.
+  // Installment 1/2/3 payments each cover tuition, kit fee and GST together (they're a split
+  // of actual_payable as a whole, not billed as separate line items), so this number alone
+  // isn't "tuition paid" yet — calculateRefundSuggestion below backs the kit-fee/GST share out.
   const tuitionPaidSoFar = payments
     .filter((p) => p.installment_label !== "Registration")
     .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
+  // Suggested refund per the company's written refund policy — registration fee, kit fee
+  // (which also covers technology/LMS and exam fees) and GST are never refundable, even though
+  // they arrive bundled inside the same installment payment as tuition does. The tuition-only
+  // share of what's been paid is refunded at a fixed percentage by week since the refund clock
+  // started (the later of batch commencement or admission date), per the official schedule.
+  // Recomputed live as the refund date changes; shown as a suggestion only — the amount
+  // field stays manually editable, defaulting to total paid.
   const suggestion = calculateRefundSuggestion({
     tuitionPaidSoFar,
     tuitionFee: admission.tuition_fee,
@@ -182,13 +193,18 @@ export default function ReceiptView({
   payments = [],
   fieldDefs = [],
   canManageRefund = false,
-  courseDurationMonths = null
+  courseDurationMonths = null,
+  canEdit = true
 }: {
   admission: any;
   payments?: Payment[];
   fieldDefs?: CustomFieldDef[];
   canManageRefund?: boolean;
   courseDurationMonths?: number | null;
+  // False when a counselor is looking up a student that isn't their own — they can still view
+  // and print everything on this page (invoice, fee summary, saved PDF), but every control that
+  // would write to this admission is hidden rather than left to fail at save time.
+  canEdit?: boolean;
 }) {
   const customEntries = fieldDefs
     .map((f) => ({ def: f, value: admission.custom_fields?.[f.field_key] }))
@@ -339,6 +355,7 @@ export default function ReceiptView({
     const pdfBlob = doc.output("blob");
     const fileName = `${(admission.student_name || "student").replace(/[^a-z0-9]+/gi, "_")}-fee-summary.pdf`;
 
+    // 1) trigger a local download for whoever is on this screen
     const localUrl = URL.createObjectURL(pdfBlob);
     const a = document.createElement("a");
     a.href = localUrl;
@@ -346,6 +363,7 @@ export default function ReceiptView({
     a.click();
     URL.revokeObjectURL(localUrl);
 
+    // 2) keep a durable copy in Supabase Storage + record the signature on the admission
     const path = `${admission.counselor_id}/${admission.id}.pdf`;
     const { error: upErr } = await supabase.storage.from("fee-receipts").upload(path, pdfBlob, {
       upsert: true,
@@ -395,9 +413,11 @@ export default function ReceiptView({
           &larr; Back to calculator
         </Link>
         <div style={{ display: "flex", gap: 10 }}>
-          <Link href={`/admissions/${admission.id}/edit`} className="btn secondary small">
-            Edit details
-          </Link>
+          {canEdit && (
+            <Link href={`/admissions/${admission.id}/edit`} className="btn secondary small">
+              Edit details
+            </Link>
+          )}
           <Link href={`/admissions/${admission.id}/invoice`} className="btn secondary small">
             Print invoice
           </Link>
@@ -485,6 +505,7 @@ export default function ReceiptView({
               inst2Override={admission.inst2_override}
               inst3={admission.inst3}
               actualPayable={admission.actual_payable}
+              canEdit={canEdit}
               onChanged={() => router.refresh()}
             />
             <PaymentsPanel
@@ -493,47 +514,61 @@ export default function ReceiptView({
               initialPayments={payments}
               baseAmount={admission.actual_fees_paid}
               gstRate={admission.gst_rate}
+              canEdit={canEdit}
               onChanged={() => router.refresh()}
             />
           </div>
         </div>
 
         <div className="stack">
-          <div className="card">
-            <div className="card-head">
-              <span className="kicker">08</span>
-              <h2 className="card-title">Sign &amp; Download PDF</h2>
-            </div>
-            <p className="comp-hint" style={{ marginBottom: 12 }}>
-              Draw a signature below, confirm the signer's name, then generate the PDF. It downloads to this device
-              and a signed copy is kept on file for this admission.
-            </p>
-            <div className="field" style={{ marginBottom: 12 }}>
-              <label>Signature</label>
-              <SignaturePad ref={sigRef} />
-              <button className="reset-btn" style={{ pointerEvents: "auto", alignSelf: "flex-start" }} onClick={() => sigRef.current?.clear()}>
-                Clear signature
+          {canEdit ? (
+            <div className="card">
+              <div className="card-head">
+                <span className="kicker">08</span>
+                <h2 className="card-title">Sign &amp; Download PDF</h2>
+              </div>
+              <p className="comp-hint" style={{ marginBottom: 12 }}>
+                Draw a signature below, confirm the signer's name, then generate the PDF. It downloads to this device
+                and a signed copy is kept on file for this admission.
+              </p>
+              <div className="field" style={{ marginBottom: 12 }}>
+                <label>Signature</label>
+                <SignaturePad ref={sigRef} />
+                <button className="reset-btn" style={{ pointerEvents: "auto", alignSelf: "flex-start" }} onClick={() => sigRef.current?.clear()}>
+                  Clear signature
+                </button>
+              </div>
+              <div className="field" style={{ marginBottom: 16 }}>
+                <label>Signed by (name)</label>
+                <input value={signedByName} onChange={(e) => setSignedByName(e.target.value)} placeholder="e.g. parent / guardian name" />
+              </div>
+              {error && <div className="error-text" style={{ marginBottom: 12 }}>{error}</div>}
+              {done && (
+                <div className="success-text" style={{ marginBottom: 12 }}>
+                  Downloaded and saved on file.{" "}
+                  {savedUrl && (
+                    <a href={savedUrl} target="_blank" rel="noreferrer">
+                      Open saved copy
+                    </a>
+                  )}
+                </div>
+              )}
+              <button className="btn" style={{ width: "100%" }} onClick={handleGenerate} disabled={busy}>
+                {busy ? "Generating…" : "Generate, sign & download PDF"}
               </button>
             </div>
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label>Signed by (name)</label>
-              <input value={signedByName} onChange={(e) => setSignedByName(e.target.value)} placeholder="e.g. parent / guardian name" />
-            </div>
-            {error && <div className="error-text" style={{ marginBottom: 12 }}>{error}</div>}
-            {done && (
-              <div className="success-text" style={{ marginBottom: 12 }}>
-                Downloaded and saved on file.{" "}
-                {savedUrl && (
-                  <a href={savedUrl} target="_blank" rel="noreferrer">
-                    Open saved copy
-                  </a>
-                )}
+          ) : (
+            <div className="card">
+              <div className="card-head">
+                <span className="kicker">Read-only</span>
+                <h2 className="card-title">Not your student</h2>
               </div>
-            )}
-            <button className="btn" style={{ width: "100%" }} onClick={handleGenerate} disabled={busy}>
-              {busy ? "Generating…" : "Generate, sign & download PDF"}
-            </button>
-          </div>
+              <p className="comp-hint">
+                You can view and print this student's invoice and fee summary, but payments, fee amounts and the
+                signed PDF can only be changed by {admission.student_name}'s own counselor or the owner.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </>
