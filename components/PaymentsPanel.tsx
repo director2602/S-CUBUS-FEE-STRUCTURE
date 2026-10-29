@@ -35,6 +35,7 @@ export default function PaymentsPanel({
   initialPayments,
   baseAmount,
   gstRate,
+  canEdit = true,
   onChanged
 }: {
   admissionId: string;
@@ -44,6 +45,10 @@ export default function PaymentsPanel({
   // This admission's GST rate — the card/POS convenience charge is taxed at the same rate
   // as the fee itself, so it travels through as a prop rather than being hardcoded here.
   gstRate: number;
+  // False when viewing a student that isn't yours — the payment history and "Invoice" links
+  // still show (read access is company-wide for counselors), but recording, editing or
+  // deleting a payment stays limited to that student's own counselor or the owner.
+  canEdit?: boolean;
   onChanged?: () => void;
 }) {
   const supabase = supabaseBrowser();
@@ -197,7 +202,7 @@ export default function PaymentsPanel({
           </thead>
           <tbody>
             {payments.map((p) =>
-              editingId === p.id ? (
+              canEdit && editingId === p.id ? (
                 <tr key={p.id}>
                   <td>
                     <select
@@ -264,12 +269,16 @@ export default function PaymentsPanel({
                       <Link className="reset-btn" href={`/admissions/${admissionId}/invoice?payment=${p.id}`}>
                         Invoice
                       </Link>
-                      <button className="reset-btn" disabled={saving} onClick={() => startEdit(p)}>
-                        Edit
-                      </button>
-                      <button className="reset-btn" disabled={saving} onClick={() => handleDelete(p.id)}>
-                        Delete
-                      </button>
+                      {canEdit && (
+                        <>
+                          <button className="reset-btn" disabled={saving} onClick={() => startEdit(p)}>
+                            Edit
+                          </button>
+                          <button className="reset-btn" disabled={saving} onClick={() => handleDelete(p.id)}>
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -289,112 +298,121 @@ export default function PaymentsPanel({
         </table>
       )}
 
-      <div className="field-grid" style={{ marginBottom: 10 }}>
-        <div className="field">
-          <label>Installment</label>
-          <select value={draft.installment_label} onChange={(e) => setDraft({ ...draft, installment_label: e.target.value as any })}>
-            {INSTALLMENT_LABELS.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <label>Amount received</label>
-          <input
-            className="money-input"
-            type="number"
-            min={0}
-            value={draft.amount}
-            onChange={(e) => setDraft({ ...draft, amount: e.target.value })}
-            placeholder="e.g. 25000"
-          />
-        </div>
-        <div className="field">
-          <label>Date paid</label>
-          <input type="date" value={draft.paid_on} onChange={(e) => setDraft({ ...draft, paid_on: e.target.value })} />
-        </div>
-        <div className="field">
-          <label>Mode</label>
-          <select value={draft.mode} onChange={(e) => setDraftMode(e.target.value)}>
-            <option value="">Select mode</option>
-            {PAYMENT_MODES.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <label
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 10,
-          border: "1.5px solid var(--accent)",
-          background: "rgba(64,12,77,0.04)",
-          borderRadius: 12,
-          padding: "12px 14px",
-          marginBottom: 14,
-          cursor: "pointer"
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={draft.cardCharge}
-          onChange={(e) => setDraftCardCharge(e.target.checked)}
-          style={{ width: 18, height: 18, marginTop: 2, accentColor: "var(--accent)", flexShrink: 0 }}
-        />
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 13.5 }}>
-            Customer is paying by Card / QR on the POS machine &mdash; add {CARD_CHARGE_RATE}% card charge
-          </div>
-          <div className="comp-hint" style={{ marginTop: 2 }}>
-            Ticking this selects &ldquo;{CARD_MODE}&rdquo; as the mode and adds a separate, GST-ed convenience-charge
-            line to this payment&apos;s invoice &mdash; it does not reduce the student&apos;s fee due, only the
-            amount above does that.
-          </div>
-          {draft.cardCharge && draftAmt > 0 && draftCharge && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: "10px 12px",
-                background: "#fff",
-                border: "1px dashed var(--line)",
-                borderRadius: 10,
-                fontSize: 12.5,
-                display: "grid",
-                gridTemplateColumns: "1fr auto",
-                rowGap: 4
-              }}
-            >
-              <div>{CARD_CHARGE_RATE}% of {formatINR(draftAmt)} fee received</div>
-              <div>{formatINR(draftCharge.base)}</div>
-              <div>+ GST @ {gstRate}% on that charge</div>
-              <div>{formatINR(draftCharge.gst)}</div>
-              <div style={{ fontWeight: 700, borderTop: "1px solid var(--line)", paddingTop: 5, marginTop: 1 }}>
-                Card charge added to invoice
-              </div>
-              <div style={{ fontWeight: 700, borderTop: "1px solid var(--line)", paddingTop: 5, marginTop: 1, color: "var(--accent)" }}>
-                {formatINR(draftCharge.total)}
-              </div>
+      {canEdit ? (
+        <>
+          <div className="field-grid" style={{ marginBottom: 10 }}>
+            <div className="field">
+              <label>Installment</label>
+              <select value={draft.installment_label} onChange={(e) => setDraft({ ...draft, installment_label: e.target.value as any })}>
+                {INSTALLMENT_LABELS.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-        </div>
-      </label>
+            <div className="field">
+              <label>Amount received</label>
+              <input
+                className="money-input"
+                type="number"
+                min={0}
+                value={draft.amount}
+                onChange={(e) => setDraft({ ...draft, amount: e.target.value })}
+                placeholder="e.g. 25000"
+              />
+            </div>
+            <div className="field">
+              <label>Date paid</label>
+              <input type="date" value={draft.paid_on} onChange={(e) => setDraft({ ...draft, paid_on: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Mode</label>
+              <select value={draft.mode} onChange={(e) => setDraftMode(e.target.value)}>
+                <option value="">Select mode</option>
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-      <div className="field-grid" style={{ marginBottom: 10 }}>
-        <div className="field full">
-          <label>Note (optional)</label>
-          <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="e.g. cheque no. 000123" />
-        </div>
-      </div>
-      {error && <div className="error-text" style={{ marginBottom: 10 }}>{error}</div>}
-      <button className="btn secondary small" disabled={saving} onClick={handleAdd}>
-        {saving ? "Saving…" : "+ Record payment"}
-      </button>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+              border: "1.5px solid var(--accent)",
+              background: "rgba(64,12,77,0.04)",
+              borderRadius: 12,
+              padding: "12px 14px",
+              marginBottom: 14,
+              cursor: "pointer"
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={draft.cardCharge}
+              onChange={(e) => setDraftCardCharge(e.target.checked)}
+              style={{ width: 18, height: 18, marginTop: 2, accentColor: "var(--accent)", flexShrink: 0 }}
+            />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                Customer is paying by Card / QR on the POS machine &mdash; add {CARD_CHARGE_RATE}% card charge
+              </div>
+              <div className="comp-hint" style={{ marginTop: 2 }}>
+                Ticking this selects &ldquo;{CARD_MODE}&rdquo; as the mode and adds a separate, GST-ed convenience-charge
+                line to this payment&apos;s invoice &mdash; it does not reduce the student&apos;s fee due, only the
+                amount above does that.
+              </div>
+              {draft.cardCharge && draftAmt > 0 && draftCharge && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "10px 12px",
+                    background: "#fff",
+                    border: "1px dashed var(--line)",
+                    borderRadius: 10,
+                    fontSize: 12.5,
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto",
+                    rowGap: 4
+                  }}
+                >
+                  <div>{CARD_CHARGE_RATE}% of {formatINR(draftAmt)} fee received</div>
+                  <div>{formatINR(draftCharge.base)}</div>
+                  <div>+ GST @ {gstRate}% on that charge</div>
+                  <div>{formatINR(draftCharge.gst)}</div>
+                  <div style={{ fontWeight: 700, borderTop: "1px solid var(--line)", paddingTop: 5, marginTop: 1 }}>
+                    Card charge added to invoice
+                  </div>
+                  <div style={{ fontWeight: 700, borderTop: "1px solid var(--line)", paddingTop: 5, marginTop: 1, color: "var(--accent)" }}>
+                    {formatINR(draftCharge.total)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </label>
+
+          <div className="field-grid" style={{ marginBottom: 10 }}>
+            <div className="field full">
+              <label>Note (optional)</label>
+              <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="e.g. cheque no. 000123" />
+            </div>
+          </div>
+          {error && <div className="error-text" style={{ marginBottom: 10 }}>{error}</div>}
+          <button className="btn secondary small" disabled={saving} onClick={handleAdd}>
+            {saving ? "Saving…" : "+ Record payment"}
+          </button>
+        </>
+      ) : (
+        <p className="comp-hint">
+          You're viewing this student's payment history &mdash; only their own counselor or the owner can record,
+          edit, or delete a payment here.
+        </p>
+      )}
     </div>
   );
 }
