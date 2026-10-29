@@ -31,7 +31,11 @@ export default async function CalculatorPage() {
       batches={(batches as Batch[]) || []}
       counselorId={user!.id}
       isOwner={profile?.role === "owner"}
-      allAdmissions={profile?.role === "owner" || profile?.role === "manager" || profile?.role === "accounts"}
+      // Every role can now look up any student company-wide (read access — see
+      // admissions_select_any_counselor in the DB), so this is just the list's heading text,
+      // not a security boundary; AdmissionsList itself hides write actions row-by-row for
+      // students that aren't the viewer's own.
+      allAdmissions={true}
       fieldDefs={fieldDefs}
       canEditFees={profile?.role !== "counselor"}
       role={profile?.role || "counselor"}
