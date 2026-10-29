@@ -8,6 +8,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { calculateRefundSuggestion, formatINR, installmentDueDate, type Payment } from "@/lib/fee-calc";
 import SignaturePad, { type SignaturePadHandle } from "@/components/SignaturePad";
 import PaymentsPanel from "@/components/PaymentsPanel";
+import FeeReconciliation from "@/components/FeeReconciliation";
 import { setRefundStatus } from "@/app/actions/admissions";
 import type { CustomFieldDef } from "@/lib/custom-fields";
 
@@ -37,21 +38,10 @@ function RefundControl({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // What's been paid so far excluding Registration — but this is still a BLENDED figure.
-  // Installment 1/2/3 payments each cover tuition, kit fee and GST together (they're a split
-  // of actual_payable as a whole, not billed as separate line items), so this number alone
-  // isn't "tuition paid" yet — calculateRefundSuggestion below backs the kit-fee/GST share out.
   const tuitionPaidSoFar = payments
     .filter((p) => p.installment_label !== "Registration")
     .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-  // Suggested refund per the company's written refund policy — registration fee, kit fee
-  // (which also covers technology/LMS and exam fees) and GST are never refundable, even though
-  // they arrive bundled inside the same installment payment as tuition does. The tuition-only
-  // share of what's been paid is refunded at a fixed percentage by week since the refund clock
-  // started (the later of batch commencement or admission date), per the official schedule.
-  // Recomputed live as the refund date changes; shown as a suggestion only — the amount
-  // field stays manually editable, defaulting to total paid.
   const suggestion = calculateRefundSuggestion({
     tuitionPaidSoFar,
     tuitionFee: admission.tuition_fee,
@@ -349,7 +339,6 @@ export default function ReceiptView({
     const pdfBlob = doc.output("blob");
     const fileName = `${(admission.student_name || "student").replace(/[^a-z0-9]+/gi, "_")}-fee-summary.pdf`;
 
-    // 1) trigger a local download for whoever is on this screen
     const localUrl = URL.createObjectURL(pdfBlob);
     const a = document.createElement("a");
     a.href = localUrl;
@@ -357,7 +346,6 @@ export default function ReceiptView({
     a.click();
     URL.revokeObjectURL(localUrl);
 
-    // 2) keep a durable copy in Supabase Storage + record the signature on the admission
     const path = `${admission.counselor_id}/${admission.id}.pdf`;
     const { error: upErr } = await supabase.storage.from("fee-receipts").upload(path, pdfBlob, {
       upsert: true,
@@ -486,6 +474,19 @@ export default function ReceiptView({
           )}
 
           <div id="payments" style={{ scrollMarginTop: 20 }}>
+            <FeeReconciliation
+              admissionId={admission.id}
+              payments={payments}
+              regFee={admission.inst0}
+              regFeeOverride={admission.reg_fee_override}
+              inst1={admission.inst1}
+              inst1Override={admission.inst1_override}
+              inst2={admission.inst2}
+              inst2Override={admission.inst2_override}
+              inst3={admission.inst3}
+              actualPayable={admission.actual_payable}
+              onChanged={() => router.refresh()}
+            />
             <PaymentsPanel
               admissionId={admission.id}
               counselorId={admission.counselor_id}
