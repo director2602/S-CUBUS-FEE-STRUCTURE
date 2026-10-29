@@ -30,6 +30,14 @@ export default async function AdmissionPage({ params }: { params: { id: string }
 
   const canManageRefund = profile?.role === "owner" || profile?.role === "manager";
 
+  // Any counselor can now look up and view/print any student's invoice (company-wide read
+  // access — see admissions_select_any_counselor / payments_select_any_counselor in the DB),
+  // but editing payments, overriding fee amounts, or re-signing the fee summary stays limited
+  // to that student's own assigned counselor, or the owner — same as the database write
+  // policies already enforce. This flag is what hides those write controls in the UI instead
+  // of letting someone click "Save" and discover it fails.
+  const canEdit = profile?.role === "owner" || user?.id === (admission as any).counselor_id;
+
   // Fetched separately rather than via admissions_computed — that view's deeply chained CTEs
   // would need every layer touched to carry one more column through, where a direct lookup
   // on the admission's own batch_key does the same job in one query.
@@ -47,6 +55,7 @@ export default async function AdmissionPage({ params }: { params: { id: string }
       fieldDefs={fieldDefs}
       canManageRefund={canManageRefund}
       courseDurationMonths={courseDurationMonths}
+      canEdit={canEdit}
     />
   );
 }
