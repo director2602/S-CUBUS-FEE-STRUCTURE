@@ -39,7 +39,7 @@ export default function CalculatorPageClient({
         canEditFees={canEditFees}
       />
       <div style={{ height: 32 }} />
-      <AdmissionsList isOwner={isOwner} allAdmissions={allAdmissions} reloadToken={reloadToken} role={role} />
+      <AdmissionsList isOwner={isOwner} allAdmissions={allAdmissions} reloadToken={reloadToken} role={role} counselorId={counselorId} />
     </>
   );
 }
