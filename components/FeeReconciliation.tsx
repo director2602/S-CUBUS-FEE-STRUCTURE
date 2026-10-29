@@ -15,6 +15,8 @@ type Component = {
   hint: string;
 };
 
+const cellTop = { verticalAlign: "top" } as const;
+
 export default function FeeReconciliation({
   admissionId,
   payments,
@@ -26,6 +28,7 @@ export default function FeeReconciliation({
   inst2Override,
   inst3,
   actualPayable,
+  canEdit = true,
   onChanged
 }: {
   admissionId: string;
@@ -38,6 +41,9 @@ export default function FeeReconciliation({
   inst2Override: number | null;
   inst3: number;
   actualPayable: number;
+  // False when viewing a student that isn't yours — the table still shows allotted/paid/balance,
+  // just without the Edit / Reset-to-auto controls.
+  canEdit?: boolean;
   onChanged?: () => void;
 }) {
   const supabase = supabaseBrowser();
@@ -61,28 +67,28 @@ export default function FeeReconciliation({
       allotted: regFee,
       overrideColumn: "reg_fee_override",
       overrideValue: regFeeOverride,
-      hint: "Editing this sets the registration fee directly on this admission."
+      hint: "Sets the registration fee itself."
     },
     {
       key: "Installment 1",
       allotted: inst1,
       overrideColumn: "inst1_override",
       overrideValue: inst1Override,
-      hint: "Default is 40% of whatever's left after Registration. Installment 2 (if not separately set) and Installment 3 recalculate automatically to keep the total correct."
+      hint: "Default: 40% of the remainder."
     },
     {
       key: "Installment 2",
       allotted: inst2,
       overrideColumn: "inst2_override",
       overrideValue: inst2Override,
-      hint: "Default is half of whatever's left after Registration and Installment 1. Installment 3 recalculates automatically to keep the total correct."
+      hint: "Default: half of what's left."
     },
     {
       key: "Installment 3",
       allotted: inst3,
       overrideColumn: null,
       overrideValue: null,
-      hint: "Always whatever's left after the other three — not independently editable, so the four always add up to the total fee."
+      hint: "Always auto-balances."
     }
   ];
 
@@ -151,110 +157,116 @@ export default function FeeReconciliation({
         reconciles here.
       </p>
 
-      <table className="data">
-        <thead>
-          <tr>
-            <th>Component</th>
-            <th style={{ textAlign: "right" }}>Allotted</th>
-            <th style={{ textAlign: "right" }}>Paid so far</th>
-            <th style={{ textAlign: "right" }}>Balance</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {components.map((c) => {
-            const paid = paidByLabel[c.key] || 0;
-            const balance = round2(c.allotted - paid);
-            const isEditing = editingKey === c.key;
-            return (
-              <tr key={c.key}>
-                <td>
-                  {c.key}
-                  <div className="comp-hint" style={{ marginTop: 2 }}>{c.hint}</div>
-                </td>
-                <td className="amt">
-                  {isEditing ? (
-                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+      <div style={{ overflowX: "auto" }}>
+        <table className="data" style={{ minWidth: 620 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 160 }}>Component</th>
+              <th style={{ textAlign: "right", width: 130 }}>Allotted</th>
+              <th style={{ textAlign: "right", width: 110 }}>Paid</th>
+              <th style={{ textAlign: "right", width: 110 }}>Balance</th>
+              <th style={{ width: 140 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {components.map((c) => {
+              const paid = paidByLabel[c.key] || 0;
+              const balance = round2(c.allotted - paid);
+              const isEditing = editingKey === c.key;
+              return (
+                <tr key={c.key}>
+                  <td style={cellTop}>
+                    <div style={{ fontWeight: 600 }}>{c.key}</div>
+                    <div className="comp-hint" style={{ marginTop: 2, whiteSpace: "nowrap" }}>{c.hint}</div>
+                  </td>
+                  <td className="amt" style={cellTop}>
+                    {isEditing ? (
                       <input
                         className="money-input"
                         type="number"
                         min={0}
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        style={{ width: 110 }}
+                        style={{ width: 100, textAlign: "right" }}
                         autoFocus
                       />
-                    </div>
-                  ) : (
-                    <>
-                      {formatINR2(c.allotted)}
-                      {c.overrideColumn && c.overrideValue != null && (
-                        <div className="comp-hint" style={{ marginTop: 2 }}>manually set</div>
-                      )}
-                    </>
-                  )}
-                </td>
-                <td className="amt">{paid > 0 ? formatINR2(paid) : "—"}</td>
-                <td className="amt">
-                  <span style={balance < 0 ? { color: "#c0392b", fontWeight: 700 } : balance === 0 ? { color: "#2b6b45", fontWeight: 700 } : undefined}>
-                    {balance < 0 ? `+${formatINR2(Math.abs(balance))} over` : balance === 0 ? "Settled" : formatINR2(balance)}
-                  </span>
-                </td>
-                <td>
-                  {c.overrideColumn &&
-                    (isEditing ? (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button className="reset-btn" disabled={saving} onClick={() => saveEdit(c)}>
-                          {saving ? "Saving…" : "Save"}
-                        </button>
-                        <button className="reset-btn" disabled={saving} onClick={cancelEdit}>
-                          Cancel
-                        </button>
-                      </div>
                     ) : (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button className="reset-btn" onClick={() => startEdit(c)}>
-                          Edit
-                        </button>
-                        {c.overrideValue != null && (
-                          <button className="reset-btn" disabled={saving} onClick={() => resetToAuto(c)}>
-                            Reset to auto
-                          </button>
+                      <>
+                        <div>{formatINR2(c.allotted)}</div>
+                        {c.overrideColumn && c.overrideValue != null && (
+                          <div className="comp-hint" style={{ marginTop: 2 }}>manually set</div>
                         )}
-                      </div>
-                    ))}
+                      </>
+                    )}
+                  </td>
+                  <td className="amt" style={cellTop}>{paid > 0 ? formatINR2(paid) : "—"}</td>
+                  <td className="amt" style={cellTop}>
+                    <span
+                      style={
+                        balance < 0
+                          ? { color: "#c0392b", fontWeight: 700, whiteSpace: "nowrap" }
+                          : balance === 0
+                            ? { color: "#2b6b45", fontWeight: 700 }
+                            : { whiteSpace: "nowrap" }
+                      }
+                    >
+                      {balance < 0 ? `+${formatINR2(Math.abs(balance))} over` : balance === 0 ? "Settled" : formatINR2(balance)}
+                    </span>
+                  </td>
+                  <td style={cellTop}>
+                    {canEdit && c.overrideColumn &&
+                      (isEditing ? (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                          <button className="reset-btn" disabled={saving} onClick={() => saveEdit(c)}>
+                            {saving ? "Saving…" : "Save"}
+                          </button>
+                          <button className="reset-btn" disabled={saving} onClick={cancelEdit}>
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                          <button className="reset-btn" onClick={() => startEdit(c)}>
+                            Edit
+                          </button>
+                          {c.overrideValue != null && (
+                            <button className="reset-btn" disabled={saving} onClick={() => resetToAuto(c)}>
+                              Reset to auto
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                  </td>
+                </tr>
+              );
+            })}
+            {otherPaid > 0 && (
+              <tr>
+                <td style={cellTop}>
+                  <div style={{ fontWeight: 600 }}>Other</div>
+                  <div className="comp-hint" style={{ marginTop: 2 }}>Not part of the 4-part plan.</div>
                 </td>
+                <td className="amt" style={cellTop}>—</td>
+                <td className="amt" style={cellTop}>{formatINR2(otherPaid)}</td>
+                <td className="amt" style={cellTop}>—</td>
+                <td style={cellTop}></td>
               </tr>
-            );
-          })}
-          {otherPaid > 0 && (
+            )}
             <tr>
-              <td>
-                Other
-                <div className="comp-hint" style={{ marginTop: 2 }}>
-                  Ad hoc payments not tied to the formal 4-part plan &mdash; no allotted amount to reconcile against.
-                </div>
+              <td style={cellTop}>
+                <strong>Total</strong>
               </td>
-              <td className="amt">—</td>
-              <td className="amt">{formatINR2(otherPaid)}</td>
-              <td className="amt">—</td>
-              <td></td>
+              <td className="amt" style={cellTop}>
+                <strong>{formatINR2(actualPayable)}</strong>
+              </td>
+              <td className="amt" style={cellTop}>
+                <strong>{formatINR2(Object.values(paidByLabel).reduce((s, v) => s + v, 0))}</strong>
+              </td>
+              <td colSpan={2} style={cellTop} />
             </tr>
-          )}
-          <tr>
-            <td>
-              <strong>Total</strong>
-            </td>
-            <td className="amt">
-              <strong>{formatINR2(actualPayable)}</strong>
-            </td>
-            <td className="amt">
-              <strong>{formatINR2(Object.values(paidByLabel).reduce((s, v) => s + v, 0))}</strong>
-            </td>
-            <td colSpan={2} />
-          </tr>
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
       {error && <div className="error-text" style={{ marginTop: 10 }}>{error}</div>}
     </div>
   );
