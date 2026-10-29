@@ -10,6 +10,7 @@ type Row = {
   scid: string | null;
   student_name: string;
   batch_label: string;
+  counselor_id: string;
   actual_payable?: number;
   total_paid?: number;
   outstanding?: number;
@@ -18,7 +19,7 @@ type Row = {
   pdf_path: string | null;
 };
 
-const BASE_COLS = "id, scid, student_name, batch_label, created_at, pdf_path";
+const BASE_COLS = "id, scid, student_name, batch_label, counselor_id, created_at, pdf_path";
 const AMOUNT_COLS = "actual_payable, total_paid, outstanding";
 const STATUS_COL = "billing_status";
 
@@ -26,7 +27,8 @@ export default function AdmissionsList({
   isOwner,
   allAdmissions,
   reloadToken,
-  role
+  role,
+  counselorId
 }: {
   isOwner: boolean;
   allAdmissions?: boolean;
@@ -34,6 +36,11 @@ export default function AdmissionsList({
   // Counselors see a directory only — fee/payment figures stay on the individual
   // student's own page (calculator edit / payments screen), not in this shared list.
   role?: string;
+  // The viewer's own user id — every counselor can now search up and view ANY student
+  // company-wide (read access is no longer limited to your own book), but "Update payments" /
+  // "Edit" only make sense, and only work, on a student that's actually yours (or the owner's).
+  // This is what tells each row whether to show those two links or just the read-only ones.
+  counselorId?: string;
 }) {
   const supabase = supabaseBrowser();
   // Payable/Outstanding stay owner & accounts only — managers see their team's roster and
@@ -154,57 +161,64 @@ export default function AdmissionsList({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.student_name}</td>
-                  <td>{r.scid || "—"}</td>
-                  <td>{r.batch_label}</td>
-                  {canSeeAmounts && (
-                    <>
-                      <td className="amt">{formatINR(r.actual_payable || 0)}</td>
-                      <td className="amt">{formatINR(r.outstanding || 0)}</td>
-                    </>
-                  )}
-                  {canSeeStatus && (
-                    <td>
-                      <span
-                        className={`badge ${r.billing_status === "Paid in Full" ? "good" : r.billing_status === "Unpaid" ? "bad" : "warn"}`}
-                      >
-                        {r.billing_status}
-                      </span>
-                    </td>
-                  )}
-                  <td>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <Link className="btn small" href={`/admissions/${r.id}#payments`}>
-                        Update payments
-                      </Link>
-                      <Link className="btn small secondary" href={`/admissions/${r.id}/edit`}>
-                        Edit
-                      </Link>
-                      <Link className="btn small secondary" href={`/admissions/${r.id}/invoice`}>
-                        Print invoice
-                      </Link>
-                      <Link className="btn small secondary" href={`/admissions/${r.id}/summary`}>
-                        Fee summary
-                      </Link>
-                      <Link className="btn small secondary" href={`/admissions/${r.id}`}>
-                        {r.pdf_path ? "View / re-sign" : "Sign & download"}
-                      </Link>
-                      {isOwner && (
-                        <button
-                          className="reset-btn"
-                          style={{ color: "var(--bad-fg)" }}
-                          disabled={deletingId === r.id}
-                          onClick={() => handleDelete(r)}
+              {rows.map((r) => {
+                const canEditRow = isOwner || r.counselor_id === counselorId;
+                return (
+                  <tr key={r.id}>
+                    <td>{r.student_name}</td>
+                    <td>{r.scid || "—"}</td>
+                    <td>{r.batch_label}</td>
+                    {canSeeAmounts && (
+                      <>
+                        <td className="amt">{formatINR(r.actual_payable || 0)}</td>
+                        <td className="amt">{formatINR(r.outstanding || 0)}</td>
+                      </>
+                    )}
+                    {canSeeStatus && (
+                      <td>
+                        <span
+                          className={`badge ${r.billing_status === "Paid in Full" ? "good" : r.billing_status === "Unpaid" ? "bad" : "warn"}`}
                         >
-                          {deletingId === r.id ? "Deleting…" : "Delete"}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                          {r.billing_status}
+                        </span>
+                      </td>
+                    )}
+                    <td>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {canEditRow && (
+                          <>
+                            <Link className="btn small" href={`/admissions/${r.id}#payments`}>
+                              Update payments
+                            </Link>
+                            <Link className="btn small secondary" href={`/admissions/${r.id}/edit`}>
+                              Edit
+                            </Link>
+                          </>
+                        )}
+                        <Link className="btn small secondary" href={`/admissions/${r.id}/invoice`}>
+                          Print invoice
+                        </Link>
+                        <Link className="btn small secondary" href={`/admissions/${r.id}/summary`}>
+                          Fee summary
+                        </Link>
+                        <Link className="btn small secondary" href={`/admissions/${r.id}`}>
+                          {canEditRow ? (r.pdf_path ? "View / re-sign" : "Sign & download") : "View"}
+                        </Link>
+                        {isOwner && (
+                          <button
+                            className="reset-btn"
+                            style={{ color: "var(--bad-fg)" }}
+                            disabled={deletingId === r.id}
+                            onClick={() => handleDelete(r)}
+                          >
+                            {deletingId === r.id ? "Deleting…" : "Delete"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
