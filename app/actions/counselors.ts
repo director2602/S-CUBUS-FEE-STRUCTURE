@@ -151,3 +151,43 @@ export async function assignManager(counselorId: string, managerId: string | nul
   revalidatePath("/team");
   return { success: true };
 }
+
+// Switches a counselor/manager/accounts login on or off. Deactivating does two things: it bans
+// the account at the Supabase Auth level (so they can't sign in again, or stay signed in past
+// their current access token's ~1 hour lifetime), and it flips profiles.active to false, which
+// the app layout checks on every page load to sign out and bounce anyone already mid-session.
+// None of this deletes the account, its admissions, or its payment history — "Reactivate" un-bans
+// them and lets them straight back in with the same login.
+export async function setCounselorActive(id: string, active: boolean) {
+  const supabase = supabaseServer();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (profile?.role !== "owner") return { error: "Only the owner can deactivate or reactivate a login." };
+
+  if (id === user.id) return { error: "You can't deactivate your own (owner) login." };
+
+  let admin;
+  try {
+    admin = supabaseAdmin();
+  } catch (e: any) {
+    return { error: e.message };
+  }
+
+  // "none" lifts a ban; a long fixed duration stands in for "indefinitely" — GoTrue has no
+  // true permanent-ban value, only a duration to ban for.
+  const { error: banErr } = await admin.auth.admin.updateUserById(id, {
+    ban_duration: active ? "none" : "876000h"
+  });
+  if (banErr) return { error: banErr.message };
+
+  const { error } = await supabase.from("profiles").update({ active }).eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/counselors");
+  revalidatePath("/team");
+  return { success: true };
+}
