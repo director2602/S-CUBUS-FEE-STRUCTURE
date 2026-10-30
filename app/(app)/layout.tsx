@@ -11,7 +11,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase.from("profiles").select("full_name, role, email").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("full_name, role, email, active").eq("id", user.id).single();
+
+  // The owner's "Deactivate" button bans the account at the Auth level, but an access token
+  // already issued keeps working until it expires (~1 hour) — this check closes that gap
+  // immediately on the next page load, for any already-open session, by bouncing to a page
+  // that signs them out properly rather than leaving them looking at a half-working app.
+  if (profile?.active === false) redirect("/deactivated");
 
   const role = profile?.role || "counselor";
   const roleLabel = role === "owner" ? "Owner" : role === "manager" ? "Manager" : role === "accounts" ? "Accounts" : "Counselor";
