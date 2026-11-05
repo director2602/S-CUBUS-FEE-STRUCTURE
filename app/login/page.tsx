@@ -7,12 +7,18 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 export default function LoginPage() {
   const router = useRouter();
   const supabase = supabaseBrowser();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  function switchMode(next: "signin" | "signup" | "forgot") {
+    setMode(next);
+    setError(null);
+    setInfo(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,6 +31,12 @@ export default function LoginPage() {
         if (error) throw error;
         router.push("/calculator");
         router.refresh();
+      } else if (mode === "forgot") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/reset-password`
+        });
+        if (error) throw error;
+        setInfo("If an account exists for that email, a password reset link is on its way — check the inbox (and spam folder).");
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
@@ -53,11 +65,15 @@ export default function LoginPage() {
       <div className="wrap narrow">
         <div className="card">
           <div className="card-head">
-            <h2 className="card-title">{mode === "signin" ? "Sign in" : "Create the owner account"}</h2>
+            <h2 className="card-title">
+              {mode === "signin" ? "Sign in" : mode === "forgot" ? "Reset your password" : "Create the owner account"}
+            </h2>
           </div>
           <p className="comp-hint" style={{ marginBottom: 16 }}>
             {mode === "signin"
               ? "Use the email and password you (or your counselor invite) set up."
+              : mode === "forgot"
+              ? "Enter the email on your account and we'll send a link to set a new password."
               : "Sign up with director@scubus.com to get owner access automatically. Counselors get a separate email invite from the owner’s Counselors page."}
           </p>
           <form onSubmit={handleSubmit} className="stack" style={{ gap: 14 }}>
@@ -72,30 +88,59 @@ export default function LoginPage() {
                 placeholder="you@scubus.com"
               />
             </div>
-            <div className="field">
-              <label htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
+            {mode !== "forgot" && (
+              <div className="field">
+                <label htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            )}
             {error && <div className="error-text">{error}</div>}
             {info && <div className="success-text">{info}</div>}
             <button className="btn" type="submit" disabled={busy}>
-              {busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
+              {busy ? "Please wait…" : mode === "signin" ? "Sign in" : mode === "forgot" ? "Send reset link" : "Create account"}
             </button>
           </form>
-          <div style={{ marginTop: 16, fontSize: 13 }}>
-            {mode === "signin" ? (
-              <button className="reset-btn" style={{ pointerEvents: "auto", color: "var(--accent)" }} onClick={() => setMode("signup")}>
-                First time as owner? Create the owner account
+          <div style={{ marginTop: 16, fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+            {mode === "signin" && (
+              <>
+                <button
+                  className="reset-btn"
+                  style={{ pointerEvents: "auto", color: "var(--accent)", textAlign: "left" }}
+                  onClick={() => switchMode("forgot")}
+                >
+                  Forgot password?
+                </button>
+                <button
+                  className="reset-btn"
+                  style={{ pointerEvents: "auto", color: "var(--accent)", textAlign: "left" }}
+                  onClick={() => switchMode("signup")}
+                >
+                  First time as owner? Create the owner account
+                </button>
+              </>
+            )}
+            {mode === "forgot" && (
+              <button
+                className="reset-btn"
+                style={{ pointerEvents: "auto", color: "var(--accent)", textAlign: "left" }}
+                onClick={() => switchMode("signin")}
+              >
+                Back to sign in
               </button>
-            ) : (
-              <button className="reset-btn" style={{ pointerEvents: "auto", color: "var(--accent)" }} onClick={() => setMode("signin")}>
+            )}
+            {mode === "signup" && (
+              <button
+                className="reset-btn"
+                style={{ pointerEvents: "auto", color: "var(--accent)", textAlign: "left" }}
+                onClick={() => switchMode("signin")}
+              >
                 Already have an account? Sign in
               </button>
             )}
