@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 
 const OWNER_ONLY_PREFIXES = ["/dashboard", "/counselors", "/fee-structure", "/annual-plan", "/custom-fields", "/export"];
 const MANAGER_OR_OWNER_PREFIXES = ["/team"];
+const ACCOUNTS_OR_OWNER_PREFIXES = ["/invoices"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
@@ -53,6 +54,17 @@ export async function middleware(request: NextRequest) {
   if (user && MANAGER_OR_OWNER_PREFIXES.some((p) => path.startsWith(p))) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (profile?.role !== "owner" && profile?.role !== "manager") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/calculator";
+      return NextResponse.redirect(url);
+    }
+  }
+
+  // Bulk invoice export is a finance-facing feature — owner or accounts only, same as the
+  // owner-only pages above but also letting the accounts role in since they issue invoices.
+  if (user && ACCOUNTS_OR_OWNER_PREFIXES.some((p) => path.startsWith(p))) {
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (profile?.role !== "owner" && profile?.role !== "accounts") {
       const url = request.nextUrl.clone();
       url.pathname = "/calculator";
       return NextResponse.redirect(url);
