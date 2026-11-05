@@ -7,8 +7,10 @@ export default function NavLinks({ role }: { role: string }) {
   const pathname = usePathname();
   const isOwner = role === "owner";
   const isManager = role === "manager";
+  const isAccounts = role === "accounts";
   const links = [
     { href: "/calculator", label: "Calculator" },
+    ...(isOwner || isAccounts ? [{ href: "/invoices/bulk", label: "Bulk Invoices" }] : []),
     ...(isOwner || isManager ? [{ href: "/team", label: "Team Performance" }] : []),
     ...(isOwner
       ? [
