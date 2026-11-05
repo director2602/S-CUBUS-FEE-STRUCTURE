@@ -1,0 +1,260 @@
+import {
+  formatINR,
+  formatINR2,
+  HSN_SAC_CODE,
+  CARD_CHARGE_SAC_CODE,
+  CARD_CHARGE_RATE,
+  installmentInvoiceDescription,
+  amountInWordsINR,
+  round2,
+  type Payment
+} from "@/lib/fee-calc";
+
+// Mirrors the company's real Zoho tax invoice layout exactly, so a printed invoice from
+// this app and one from Zoho look like they came from the same business.
+const COMPANY = {
+  name: "S-CUBUS CAREER PRIVATE LIMITED",
+  addressLines: ["Delhi", "India"],
+  gstin: "GSTIN 07ABSCS4021P1ZQ",
+  phone: "91-8796101095",
+  email: "scubuscareerpvtltd@gmail.com",
+  placeOfSupply: "Delhi (07)"
+};
+
+const TERMS_AND_CONDITIONS =
+  "At S-CUBUS Career Pvt. Ltd., we maintain a clear and student friendly refund policy to ensure smooth processing in case a student wishes to discontinue the course after admission. Refund requests will be processed as per the refund policy of the Company.";
+
+function fmtDateSlash(d: string | null) {
+  if (!d) return "—";
+  try {
+    const dt = new Date(d);
+    const dd = String(dt.getDate()).padStart(2, "0");
+    const mm = String(dt.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${dt.getFullYear()}`;
+  } catch {
+    return d;
+  }
+}
+
+// The single tax-invoice "sheet" markup — pulled out of InvoiceView so the single-invoice
+// page and the bulk-download/print page (BulkInvoiceDownload) always render an identical
+// invoice from the same inputs, instead of two copies of this layout drifting apart.
+export default function InvoiceSheet({
+  admission,
+  selected,
+  paidBefore,
+  counselorName
+}: {
+  admission: any;
+  selected: Payment;
+  paidBefore: number;
+  counselorName?: string | null;
+}) {
+  // Outstanding against the admission's fee is driven by `amount` only — a card/POS
+  // convenience charge is a pass-through the student pays on top, never a fee payment, so it
+  // never enters this balance.
+  const outstandingAfter = Math.max(0, round2(admission.actual_payable - (paidBefore + Number(selected.amount))));
+
+  const amount = Number(selected.amount);
+  const gstRate = Number(admission.gst_rate) || 0;
+  const halfRate = round2(gstRate / 2);
+  const taxableValue = gstRate > 0 ? amount / (1 + gstRate / 100) : amount;
+  const halfTax = round2(taxableValue * (halfRate / 100));
+
+  // Card/POS convenience charge — stored tax-inclusive, same as `amount`, so it's backed out
+  // the same way for its own CGST/SGST split on the invoice.
+  const cardCharge = Number((selected as any).card_charge_amount || 0);
+  const hasCardCharge = cardCharge > 0;
+  const cardTaxableValue = gstRate > 0 ? cardCharge / (1 + gstRate / 100) : cardCharge;
+  const cardHalfTax = round2(cardTaxableValue * (halfRate / 100));
+  const grandTotal = round2(amount + cardCharge);
+
+  const invoiceNo = selected.invoice_no || "—";
+  const dateStr = fmtDateSlash(selected.paid_on);
+
+  return (
+    <div className="invoice-sheet">
+      <div style={{ border: "1px solid #999", color: "#1a1a1a", fontSize: 13, background: "#fff" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "20px 22px 16px", borderBottom: "1px solid #999" }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: 0.2 }}>{COMPANY.name}</div>
+            {COMPANY.addressLines.map((l) => (
+              <div key={l}>{l}</div>
+            ))}
+            <div>{COMPANY.gstin}</div>
+            <div>{COMPANY.phone}</div>
+            <div>{COMPANY.email}</div>
+          </div>
+          <div style={{ fontSize: 26, fontWeight: 700, whiteSpace: "nowrap" }}>TAX INVOICE</div>
+        </div>
+
+        <div style={{ display: "flex", borderBottom: "1px solid #999" }}>
+          <div style={{ flex: 1, padding: "10px 22px", display: "grid", gridTemplateColumns: "90px 1fr", rowGap: 4 }}>
+            <div>#</div>
+            <div>: {invoiceNo}</div>
+            <div>Invoice Date</div>
+            <div>: {dateStr}</div>
+            <div>Terms</div>
+            <div>: Due on Receipt</div>
+            <div>Due Date</div>
+            <div>: {dateStr}</div>
+          </div>
+          <div style={{ flex: 1, padding: "10px 22px", borderLeft: "1px solid #999", display: "grid", gridTemplateColumns: "110px 1fr", rowGap: 4 }}>
+            <div>Place Of Supply</div>
+            <div>: {COMPANY.placeOfSupply}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", borderBottom: "1px solid #999" }}>
+          <div style={{ flex: 1, padding: "10px 22px" }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Bill To</div>
+            <div style={{ fontWeight: 700 }}>{admission.student_name}</div>
+            <div>SCID : {admission.scid || "—"}</div>
+          </div>
+          <div style={{ flex: 1, padding: "10px 22px", borderLeft: "1px solid #999" }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Ship To</div>
+            <div style={{ fontWeight: 700 }}>{admission.student_name}</div>
+            <div>SCID : {admission.scid || "—"}</div>
+          </div>
+        </div>
+
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ background: "#f2f2f2" }}>
+              <th style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "left", width: 28 }}>#</th>
+              <th style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "left" }}>Item &amp; Description</th>
+              <th style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "right", width: 60 }}>HSN/SAC</th>
+              <th style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "right", width: 48 }}>Qty</th>
+              <th style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "right", width: 80 }}>Rate</th>
+              <th colSpan={2} style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "center" }}>CGST</th>
+              <th colSpan={2} style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "center" }}>SGST</th>
+              <th style={{ border: "1px solid #999", padding: "7px 8px", textAlign: "right", width: 90 }}>Amount</th>
+            </tr>
+            <tr style={{ background: "#f2f2f2" }}>
+              <th colSpan={5} style={{ border: "1px solid #999" }} />
+              <th style={{ border: "1px solid #999", padding: "4px 8px", textAlign: "right", width: 44 }}>%</th>
+              <th style={{ border: "1px solid #999", padding: "4px 8px", textAlign: "right", width: 70 }}>Amt</th>
+              <th style={{ border: "1px solid #999", padding: "4px 8px", textAlign: "right", width: 44 }}>%</th>
+              <th style={{ border: "1px solid #999", padding: "4px 8px", textAlign: "right", width: 70 }}>Amt</th>
+              <th style={{ border: "1px solid #999" }} />
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ border: "1px solid #999", padding: "8px", verticalAlign: "top" }}>1</td>
+              <td style={{ border: "1px solid #999", padding: "8px", verticalAlign: "top" }}>
+                <div style={{ fontWeight: 700 }}>{admission.batch_label}</div>
+                <div style={{ color: "#555" }}>{installmentInvoiceDescription(selected.installment_label, selected.note)}</div>
+              </td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{HSN_SAC_CODE}</td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>1.00</td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{formatINR2(amount)}</td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? `${halfRate}%` : "—"}</td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? formatINR2(halfTax) : "—"}</td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? `${halfRate}%` : "—"}</td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? formatINR2(halfTax) : "—"}</td>
+              <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top", fontWeight: 600 }}>{formatINR2(amount)}</td>
+            </tr>
+            {hasCardCharge && (
+              <tr>
+                <td style={{ border: "1px solid #999", padding: "8px", verticalAlign: "top" }}>2</td>
+                <td style={{ border: "1px solid #999", padding: "8px", verticalAlign: "top" }}>
+                  <div style={{ fontWeight: 700 }}>Card / POS Convenience Charge</div>
+                  <div style={{ color: "#555" }}>{CARD_CHARGE_RATE}% on this installment, paid via {selected.mode || "card"}</div>
+                </td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{CARD_CHARGE_SAC_CODE}</td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>1.00</td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{formatINR2(cardCharge)}</td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? `${halfRate}%` : "—"}</td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? formatINR2(cardHalfTax) : "—"}</td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? `${halfRate}%` : "—"}</td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top" }}>{gstRate > 0 ? formatINR2(cardHalfTax) : "—"}</td>
+                <td style={{ border: "1px solid #999", padding: "8px", textAlign: "right", verticalAlign: "top", fontWeight: 600 }}>{formatINR2(cardCharge)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+
+        {hasCardCharge && (
+          <div style={{ fontSize: 10.5, color: "#777", padding: "4px 22px" }}>
+            SAC {CARD_CHARGE_SAC_CODE} (financial transaction processing / card charge) &mdash; confirm with your
+            CA before relying on this code for a GST filing.
+          </div>
+        )}
+
+        <div style={{ display: "flex" }}>
+          <div style={{ flex: 1.3, padding: "14px 22px", borderRight: "1px solid #999" }}>
+            <div style={{ fontWeight: 700 }}>Total In Words</div>
+            <div style={{ fontStyle: "italic", fontWeight: 700, marginBottom: 14 }}>{amountInWordsINR(grandTotal)}</div>
+
+            <div style={{ fontWeight: 700 }}>Notes</div>
+            <div>
+              {hasCardCharge && (
+                <>
+                  Includes {formatINR(cardCharge)} card/POS convenience charge ({CARD_CHARGE_RATE}% + GST) &mdash;
+                  only {formatINR(amount)} of this counts toward the fee due.
+                  <br />
+                </>
+              )}
+              Remaining net outstanding amount{hasCardCharge ? " (fee only)" : ""}: {formatINR(outstandingAfter)} only.
+              <br />
+              Thanks for your business.
+            </div>
+
+            <div style={{ fontWeight: 700, marginTop: 14 }}>Terms &amp; Conditions</div>
+            <div>{TERMS_AND_CONDITIONS}</div>
+          </div>
+          <div style={{ flex: 1, padding: "14px 22px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", rowGap: 6 }}>
+              <div style={{ textAlign: "right" }}>
+                {hasCardCharge ? "Fee Sub Total" : "Sub Total"}
+                <div style={{ fontSize: 11, color: "#666" }}>(Tax Inclusive)</div>
+              </div>
+              <div style={{ textAlign: "right" }}>{formatINR2(amount)}</div>
+              {gstRate > 0 && (
+                <>
+                  <div style={{ textAlign: "right" }}>CGST{halfRate} ({halfRate}%)</div>
+                  <div style={{ textAlign: "right" }}>{formatINR2(halfTax)}</div>
+                  <div style={{ textAlign: "right" }}>SGST{halfRate} ({halfRate}%)</div>
+                  <div style={{ textAlign: "right" }}>{formatINR2(halfTax)}</div>
+                </>
+              )}
+              {hasCardCharge && (
+                <>
+                  <div style={{ textAlign: "right", fontWeight: 700, paddingTop: 6 }}>
+                    + Card Charge
+                    <div style={{ fontSize: 11, color: "#666", fontWeight: 400 }}>({CARD_CHARGE_RATE}% + GST)</div>
+                  </div>
+                  <div style={{ textAlign: "right", fontWeight: 700, paddingTop: 6 }}>{formatINR2(cardCharge)}</div>
+                  {gstRate > 0 && (
+                    <>
+                      <div style={{ textAlign: "right" }}>CGST{halfRate} ({halfRate}%)</div>
+                      <div style={{ textAlign: "right" }}>{formatINR2(cardHalfTax)}</div>
+                      <div style={{ textAlign: "right" }}>SGST{halfRate} ({halfRate}%)</div>
+                      <div style={{ textAlign: "right" }}>{formatINR2(cardHalfTax)}</div>
+                    </>
+                  )}
+                </>
+              )}
+              <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #999", paddingTop: 6 }}>Total</div>
+              <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #999", paddingTop: 6 }}>&#8377;{formatINR2(grandTotal)}</div>
+              <div style={{ textAlign: "right" }}>Payment Made</div>
+              <div style={{ textAlign: "right", color: "#c0392b" }}>(-) {formatINR2(grandTotal)}</div>
+              <div style={{ textAlign: "right", fontWeight: 700 }}>Balance Due</div>
+              <div style={{ textAlign: "right", fontWeight: 700 }}>&#8377;0.00</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: "40px 22px 22px", textAlign: "right" }}>
+          <div style={{ display: "inline-block", textAlign: "center" }}>
+            <div style={{ width: 200, borderTop: "1px solid #999", paddingTop: 6 }}>
+              {counselorName || " "}
+              <div style={{ fontSize: 11, color: "#555" }}>Authorized Signature</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
