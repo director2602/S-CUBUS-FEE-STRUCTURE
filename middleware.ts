@@ -30,7 +30,10 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isPublic = path.startsWith("/login") || path.startsWith("/_next") || path.startsWith("/favicon");
+  // "/reset-password" has to stay public: the recovery link lands here with the session tokens
+  // carried in the URL hash, which only the browser can read — the server sees no cookie session
+  // on that first request, so this route must not be gated behind one the way the rest of the app is.
+  const isPublic = path.startsWith("/login") || path.startsWith("/reset-password") || path.startsWith("/_next") || path.startsWith("/favicon");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
