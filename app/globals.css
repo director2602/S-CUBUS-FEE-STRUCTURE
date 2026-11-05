@@ -436,6 +436,20 @@ table.data td.amt {
   margin: 0 auto;
 }
 
+/* Bulk Invoices page: each invoice gets its own wrapper so the list reads clearly on
+   screen (a divider between invoices) and — under @media print below — so each one lands
+   on its own A4 page when the browser's own Print / Save-as-PDF is used instead of the
+   one-click "Download all" button. */
+.bulk-invoice-page {
+  margin-bottom: 28px;
+  padding-bottom: 28px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.bulk-invoice-page:last-child {
+  border-bottom: none;
+}
+
 /* ---- Annual Operating Plan ---- */
 
 .tabs {
@@ -695,5 +709,16 @@ input[type="range"] {
 
   .fee-summary-sheet table.data tr {
     page-break-inside: avoid;
+  }
+
+  .bulk-invoice-page {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+    page-break-after: always;
+  }
+
+  .bulk-invoice-page:last-child {
+    page-break-after: auto;
   }
 }
