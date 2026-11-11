@@ -55,6 +55,7 @@ export default async function DashboardPage() {
   const totalPayable = data.reduce((s, r) => s + Number(r.actual_payable || 0), 0);
   const totalCollected = data.reduce((s, r) => s + Number(r.total_paid || 0), 0);
   const totalOutstanding = data.reduce((s, r) => s + Math.max(0, Number(r.outstanding || 0)), 0);
+  const totalScholarship = data.reduce((s, r) => s + Number(r.scholarship_amount || 0), 0);
   const paidInFull = data.filter((r) => r.billing_status === "Paid in Full").length;
   const partiallyPaid = data.filter((r) => r.billing_status === "Partially Paid").length;
   const unpaid = data.filter((r) => r.billing_status === "Unpaid").length;
@@ -147,6 +148,10 @@ export default async function DashboardPage() {
         <div className="kpi">
           <div className="kpi-label">Outstanding</div>
           <div className="kpi-val">{formatINR(totalOutstanding)}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Scholarships given</div>
+          <div className="kpi-val">{formatINR(totalScholarship)}</div>
         </div>
       </div>
 
