@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { BATCH_GROUP_ORDER, computeFees, formatINR, installmentDueDate, PAYMENT_MODES, type Batch } from "@/lib/fee-calc";
+import { BATCH_GROUP_ORDER, computeFees, computeCardCharge, CARD_CHARGE_RATE, formatINR, installmentDueDate, PAYMENT_MODES, round2, type Batch } from "@/lib/fee-calc";
 import { cleanCustomFieldValues, type CustomFieldDef } from "@/lib/custom-fields";
 import CustomFieldInputs from "@/components/CustomFieldInputs";
 import { currentFiscalYear } from "@/lib/aop-calc";
@@ -55,6 +55,10 @@ const emptyStudent: Student = {
 };
 
 const emptyNotes: Notes = { modeReg: "", mode1: "", mode2: "", mode3: "", pdc1: "", pdc2: "", remarks: "" };
+
+// The one payment mode that triggers an automatic card/POS convenience-charge estimate
+// below — kept as the single source of truth so it can't drift from PAYMENT_MODES' own label.
+const CARD_MODE = "Debit/Credit Card";
 
 // SCID format: SC + {both years of the fiscal year, e.g. 26 + 27 = "2627"} + "-" +
 // {4-digit sequence} — e.g. SC2627-0001 for the first admission of FY 2026-27, SC2627-0142
@@ -219,6 +223,20 @@ export default function CalculatorForm({
       actualFeesPaid
     });
   }, [batch, regOverride, tuitionOverride, kitOverride, scholarshipPct, gstRate, additionalDiscount, actualFeesPaid]);
+
+  // Automatic, estimated card/POS convenience charge (same 1.5% + GST rule used when an
+  // actual payment is later recorded) for whichever stage(s) have "Debit/Credit Card" picked
+  // as their mode here — a preview only, so the counselor can quote the student the real total
+  // up front. It never touches what gets saved; the official charge is still set when that
+  // installment's actual payment is recorded on the admission's Payments panel.
+  const cardCharges = useMemo(() => {
+    if (!result) return { reg: 0, inst1: 0, inst2: 0, inst3: 0, total: 0 };
+    const reg = notes.modeReg === CARD_MODE ? computeCardCharge(result.installments.inst0, gstRate).total : 0;
+    const inst1 = notes.mode1 === CARD_MODE ? computeCardCharge(result.installments.inst1, gstRate).total : 0;
+    const inst2 = notes.mode2 === CARD_MODE ? computeCardCharge(result.installments.inst2, gstRate).total : 0;
+    const inst3 = notes.mode3 === CARD_MODE ? computeCardCharge(result.installments.inst3, gstRate).total : 0;
+    return { reg, inst1, inst2, inst3, total: round2(reg + inst1 + inst2 + inst3) };
+  }, [result, notes.modeReg, notes.mode1, notes.mode2, notes.mode3, gstRate]);
 
   function resetAllForNewBatch(key: string) {
     setBatchKey(key);
@@ -657,13 +675,19 @@ export default function CalculatorForm({
             </div>
           )}
           <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
-          <div className="sum-row">
-            <span className="sum-label strong">Actual fee payable</span>
-            <span className="sum-val big">{formatINR(result.actualPayable)}</span>
+          {cardCharges.total > 0 && (
+            <div className="sum-row">
+              <span className="sum-label">Est. card/POS charges ({CARD_CHARGE_RATE}% + GST on card-mode installments)</span>
+              <span className="sum-val">+ {formatINR(cardCharges.total)}</span>
+            </div>
+          )}
+          <div className="sum-row total">
+            <span className="sum-label strong">Actual fee payable{cardCharges.total > 0 ? " (incl. card charges)" : ""}</span>
+            <span className="sum-val big">{formatINR(result.actualPayable + cardCharges.total)}</span>
           </div>
           <div className="sum-row">
             <span className="sum-label">Net outstanding {mode === "edit" && initial?.payments_count > 0 ? "(excl. tracked installments)" : ""}</span>
-            <span className="sum-val">{formatINR(Math.max(result.outstanding, 0))}</span>
+            <span className="sum-val">{formatINR(Math.max(result.outstanding, 0) + cardCharges.total)}</span>
           </div>
           <div className="sum-row">
             <span className="sum-label">Billing status</span>
@@ -687,27 +711,39 @@ export default function CalculatorForm({
             </thead>
             <tbody>
               <tr>
-                <td>On registration</td>
-                <td className="amt">{formatINR(result.installments.inst0)}</td>
-              </tr>
-              <tr>
-                <td>1st &mdash; before batch commencement (40% of balance)</td>
-                <td className="amt">{formatINR(result.installments.inst1)}</td>
-              </tr>
-              <tr>
-                <td>2nd &mdash; due {installmentDueDate(student.batchStart, 2) || "by the 20th of month 2"}</td>
-                <td className="amt">{formatINR(result.installments.inst2)}</td>
-              </tr>
-              <tr>
-                <td>3rd &mdash; due {installmentDueDate(student.batchStart, 4) || "by the 20th of month 4"}</td>
-                <td className="amt">{formatINR(result.installments.inst3)}</td>
+                <td>
+                  On registration
+                  {cardCharges.reg > 0 && <div className="comp-hint">+ {formatINR(cardCharges.reg)} card charge</div>}
+                </td>
+                <td className="amt">{formatINR(result.installments.inst0 + cardCharges.reg)}</td>
               </tr>
               <tr>
                 <td>
-                  <strong>Total of installments</strong>
+                  1st &mdash; before batch commencement (40% of balance)
+                  {cardCharges.inst1 > 0 && <div className="comp-hint">+ {formatINR(cardCharges.inst1)} card charge</div>}
+                </td>
+                <td className="amt">{formatINR(result.installments.inst1 + cardCharges.inst1)}</td>
+              </tr>
+              <tr>
+                <td>
+                  2nd &mdash; due {installmentDueDate(student.batchStart, 2) || "by the 20th of month 2"}
+                  {cardCharges.inst2 > 0 && <div className="comp-hint">+ {formatINR(cardCharges.inst2)} card charge</div>}
+                </td>
+                <td className="amt">{formatINR(result.installments.inst2 + cardCharges.inst2)}</td>
+              </tr>
+              <tr>
+                <td>
+                  3rd &mdash; due {installmentDueDate(student.batchStart, 4) || "by the 20th of month 4"}
+                  {cardCharges.inst3 > 0 && <div className="comp-hint">+ {formatINR(cardCharges.inst3)} card charge</div>}
+                </td>
+                <td className="amt">{formatINR(result.installments.inst3 + cardCharges.inst3)}</td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Total of installments{cardCharges.total > 0 ? " (incl. card charges)" : ""}</strong>
                 </td>
                 <td className="amt">
-                  <strong>{formatINR(result.installments.total)}</strong>
+                  <strong>{formatINR(result.installments.total + cardCharges.total)}</strong>
                 </td>
               </tr>
             </tbody>
