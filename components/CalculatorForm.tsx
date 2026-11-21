@@ -346,6 +346,11 @@ export default function CalculatorForm({
     // numbers only exist for rows in the payments table, so without this there would be
     // nothing to print until a later installment is logged from the Payments panel.
     if (actualFeesPaid > 0) {
+      // Card/POS convenience charge on this opening payment — same 1.5% + GST rule as any
+      // other payment, computed on the amount actually being collected right now (not the
+      // theoretical registration-stage split used for the on-screen estimate above), so the
+      // invoice this generates shows the correct separate card-charge line item straight away.
+      const openingCardCharge = notes.modeReg === CARD_MODE ? computeCardCharge(actualFeesPaid, gstRate).total : 0;
       const { error: payErr } = await supabase.from("payments").insert({
         admission_id: newAdmissionId,
         installment_label: "Registration",
@@ -353,7 +358,8 @@ export default function CalculatorForm({
         paid_on: student.admissionDate,
         mode: notes.modeReg || null,
         note: null,
-        recorded_by: counselorId
+        recorded_by: counselorId,
+        card_charge_amount: openingCardCharge
       });
       if (payErr) {
         setPaymentWarning(
